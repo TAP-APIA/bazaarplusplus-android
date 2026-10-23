@@ -77,12 +77,29 @@ target/
 *.a
 *.jar
 
-# Packaged deliverables
+# Compiled/managed binaries. Vendored BepInEx payloads under
+# src-tauri/resources/SourceForBuild are restored from BepInEx.zip at build time,
+# so only their configuration and licence files are tracked.
+*.dll
+*.exe
+*.pyd
+
+# Vendored BepInEx core (DLLs and generated XML docs) is a packaging input,
+# never source; keep only the directory .gitkeep files above it.
+bazaarplusplus-installer/src-tauri/resources/SourceForBuild/*/BepInEx/core/
+bazaarplusplus-installer/src-tauri/resources/SourceForBuild/*/BepInEx/plugins/*.dll
+bazaarplusplus-installer/src-tauri/resources/SourceForBuild/*/TheBazaar.app/Contents/Plugins/*.bundle/Contents/MacOS/
+
+# Packaged deliverables and captured payload corpora
 *.zip
 *.tar
 *.tar.gz
+*.tgz
+*.7z
+*.nupkg
 *.mpack
 *.mpack.gz
+*.mpack.*
 
 # Signing material — never commit
 *.keystore
@@ -94,8 +111,10 @@ target/
 # Secrets
 .env
 .env.*
+!.env.example
 *.secret
 secrets.json
+.bpp-local.json
 
 # Reverse-engineering output and device dumps
 apk_extracted/
@@ -105,6 +124,7 @@ android-test/
 dumped/
 dumped2/
 dumped3/
+dumped*/
 interop/
 interop-unity/
 interop145/
