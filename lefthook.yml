@@ -1,0 +1,54 @@
+# Workspace Git hooks. Install with `just hooks-install`.
+# Recipes own the gates; only installer defers its expensive source gate to push.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: workspace
+      glob: &workspace_paths '{JUSTFILE,**/*.just,package*.json,.nvmrc,.prettierrc.json,lefthook.yml,VERSION,release.mjs,release/**,scripts/**}'
+      run: just commands-check release::check
+
+    - name: mod
+      glob: &mod_paths '{bazaarplusplus-mod/**,bazaarplusplus-server/contracts/**,bazaarplusplus-analyzer/contracts/**,release/**,VERSION,JUSTFILE}'
+      run: just mod::check
+
+    - name: installer
+      glob: &installer_paths '{bazaarplusplus-installer/**,release.mjs,release/**,VERSION,scripts/**,JUSTFILE}'
+      run: just installer::check-fast
+
+    - name: site
+      glob: &site_paths '{bazaarplusplus-site/**,bazaarplusplus-installer/src/styles/tokens.css,bazaarplusplus-analyzer/contracts/**,release/**,JUSTFILE}'
+      run: just site::check
+
+    - name: server
+      glob: &server_paths '{bazaarplusplus-server/**,JUSTFILE}'
+      run: just server::check
+
+    - name: analyzer
+      glob: &analyzer_paths '{bazaarplusplus-analyzer/**,bazaarplusplus-server/contracts/**,JUSTFILE}'
+      run: just analyzer::check
+
+pre-push:
+  jobs:
+    - name: workspace
+      glob: *workspace_paths
+      run: just commands-check release::check release::test
+
+    - name: mod
+      glob: *mod_paths
+      run: just mod::test
+
+    - name: installer
+      glob: *installer_paths
+      run: just installer::check installer::test
+
+    - name: site
+      glob: *site_paths
+      run: just site::test
+
+    - name: server
+      glob: *server_paths
+      run: just server::test
+
+    - name: analyzer
+      glob: *analyzer_paths
+      run: just analyzer::test

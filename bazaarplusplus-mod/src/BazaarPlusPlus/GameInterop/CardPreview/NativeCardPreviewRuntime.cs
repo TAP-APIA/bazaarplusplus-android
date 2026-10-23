@@ -1,0 +1,139 @@
+#nullable enable
+using System.Reflection;
+using System.Runtime.ExceptionServices;
+using BazaarGameShared.Domain.Cards;
+using UnityEngine;
+
+namespace BazaarPlusPlus.GameInterop.CardPreview;
+
+internal static class NativeCardPreviewRuntime
+{
+    public static NativeCardPreviewFailure? Resize(Component card, Guid? templateId)
+    {
+        var method = NativeCardPreviewReflection.ResizeMethod;
+        if (method == null)
+            return new NativeCardPreviewFailure(
+                NativeCardPreviewOperation.Resize,
+                NativeCardPreviewFailureReason.ReflectionUnavailable,
+                templateId
+            );
+
+        try
+        {
+            method.Invoke(card, Array.Empty<object>());
+        }
+        catch (Exception ex)
+        {
+            return new NativeCardPreviewFailure(
+                NativeCardPreviewOperation.Resize,
+                NativeCardPreviewFailureReason.ResizeException,
+                templateId,
+                ex
+            );
+        }
+        return null;
+    }
+
+    public static NativeCardPreviewFailure? Show(Component card, bool show, Guid? templateId)
+    {
+        var method = NativeCardPreviewReflection.ShowMethod;
+        if (method == null || card == null)
+            return method == null
+                ? new NativeCardPreviewFailure(
+                    NativeCardPreviewOperation.Show,
+                    NativeCardPreviewFailureReason.ReflectionUnavailable,
+                    templateId
+                )
+                : null;
+
+        try
+        {
+            method.Invoke(card, new object[] { show });
+        }
+        catch (Exception ex)
+        {
+            return new NativeCardPreviewFailure(
+                NativeCardPreviewOperation.Show,
+                NativeCardPreviewFailureReason.ShowException,
+                templateId,
+                ex
+            );
+        }
+        return null;
+    }
+
+    public static async Task<NativeCardPreviewFailure?> InvokeSetUpSafe(
+        Component card,
+        TCardBase template,
+        TCardInstance instance,
+        bool usePremiumVisuals,
+        CancellationToken token = default
+    )
+    {
+        var method = NativeCardPreviewReflection.SetUpMethod;
+        if (method == null)
+            return new NativeCardPreviewFailure(
+                NativeCardPreviewOperation.SetUp,
+                NativeCardPreviewFailureReason.ReflectionUnavailable,
+                template?.Id.ToSystemGuid()
+            );
+
+        try
+        {
+#if BPP_ANDROID
+            if (card.AsIl2Cpp<TheBazaar.UI.CardPreviewBase>() is not { } previewBase)
+            {
+                return new NativeCardPreviewFailure(
+                    NativeCardPreviewOperation.SetUp,
+                    NativeCardPreviewFailureReason.ReflectionUnavailable,
+                    template?.Id.ToSystemGuid()
+                );
+            }
+            await previewBase
+                .SetUp(
+                    template,
+                    usePremiumVisuals,
+                    instance,
+                    new Il2CppSystem.Threading.CancellationToken()
+                )
+                .AsManagedTask();
+#else
+            var raw = method.Invoke(
+                card,
+                new object[] { template, usePremiumVisuals, instance, token }
+            );
+            if (raw is Task task)
+                await task;
+#endif
+            token.ThrowIfCancellationRequested();
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is OperationCanceledException)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();
+            throw;
+        }
+        catch (TargetInvocationException ex)
+        {
+            return new NativeCardPreviewFailure(
+                NativeCardPreviewOperation.SetUp,
+                NativeCardPreviewFailureReason.SetUpException,
+                template?.Id.ToSystemGuid(),
+                ex.InnerException ?? ex
+            );
+        }
+        catch (Exception ex)
+        {
+            return new NativeCardPreviewFailure(
+                NativeCardPreviewOperation.SetUp,
+                NativeCardPreviewFailureReason.SetUpException,
+                template?.Id.ToSystemGuid(),
+                ex
+            );
+        }
+    }
+}

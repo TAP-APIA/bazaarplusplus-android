@@ -1,0 +1,23 @@
+#nullable enable
+namespace BazaarPlusPlus.Storage.RunLog;
+
+public sealed class RunLogCheckpoint
+{
+    public long LastSeq { get; set; }
+
+    public DateTimeOffset LastSeenAtUtc { get; set; }
+
+    public int? Day { get; set; }
+
+    public int? Hour { get; set; }
+
+    public int? MaxHealth { get; set; }
+
+    public int? Prestige { get; set; }
+
+    public int? Level { get; set; }
+
+    public int? Income { get; set; }
+
+    public int? Gold { get; set; }
+}

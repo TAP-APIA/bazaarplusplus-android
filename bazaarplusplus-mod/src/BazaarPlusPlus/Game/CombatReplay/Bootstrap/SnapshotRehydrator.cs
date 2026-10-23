@@ -1,0 +1,307 @@
+#nullable enable
+
+#if !BPP_ANDROID
+using System.Reflection;
+#endif
+using BazaarGameClient.Domain.Models.Cards;
+using BazaarGameShared.Domain.Core.Types;
+using BazaarGameShared.Domain.Players;
+using BazaarGameShared.Infra.Messages;
+using BazaarGameShared.Infra.Messages.GameSimEvents;
+using BazaarPlusPlus.Game.PvpBattles;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using TheBazaar;
+
+namespace BazaarPlusPlus.Game.CombatReplay.Bootstrap;
+
+internal static class SnapshotRehydrator
+{
+    internal static void CompleteEmptyOpponentSnapshotsFromOpening(
+        PvpBattleManifest manifest,
+        NetMessageGameSim spawnMessage
+    )
+    {
+        if (manifest == null)
+            throw new ArgumentNullException(nameof(manifest));
+        if (spawnMessage == null)
+            throw new ArgumentNullException(nameof(spawnMessage));
+
+        var handBefore = manifest.Snapshots.OpponentHand.Items.Count;
+        var skillsBefore = manifest.Snapshots.OpponentSkills.Items.Count;
+        if (handBefore > 0 && skillsBefore > 0)
+            return;
+
+        var opening = PvpBattleSnapshotCollector.ReadOpponentSnapshotsFromOpening(
+            spawnMessage,
+            manifest.BattleId
+        );
+        // Old Android captures could label a failed CLR type filter as CapturedEmpty. Only
+        // replace an empty capture when the recorded native message proves it contains cards.
+        if (handBefore == 0 && opening.Hand.Items.Count > 0)
+            manifest.Snapshots.OpponentHand = opening.Hand;
+        if (skillsBefore == 0 && opening.Skills.Items.Count > 0)
+            manifest.Snapshots.OpponentSkills = opening.Skills;
+
+        BppLog.InfoEvent(
+            new BppLogEvent(
+                BppLogFeatureScope.CombatReplay,
+                "combat_replay.playback.opening_snapshots_recovered"
+            ),
+            ("battle_id", manifest.BattleId, BppLogCorrelationPolicy.Short),
+            ("opponent_hand_before", handBefore),
+            ("opponent_hand_parsed", opening.Hand.Items.Count),
+            ("opponent_hand_after", manifest.Snapshots.OpponentHand.Items.Count),
+            ("opponent_socket_effects_after", manifest.Snapshots.OpponentHand.Items.Count(snapshot =>
+                snapshot.Type == ECardType.SocketEffect)),
+            ("opponent_hand_placed", manifest.Snapshots.OpponentHand.Items.Count(snapshot =>
+                snapshot.Section == EInventorySection.Hand && snapshot.Socket.HasValue)),
+            ("opponent_skills_before", skillsBefore),
+            ("opponent_skills_parsed", opening.Skills.Items.Count),
+            ("opponent_skills_after", manifest.Snapshots.OpponentSkills.Items.Count)
+        );
+    }
+
+    internal static void RehydratePlayerCards(
+        PvpBattleManifest manifest,
+        NetMessageGameSim spawnMessage,
+        IReplayPlaybackOutcomeSink outcome
+    )
+    {
+        var capture = manifest.Snapshots.PlayerHand;
+        if (capture.Status == PvpBattleCaptureStatus.Missing)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.PlayerSnapshotUnavailable);
+            return;
+        }
+
+        RehydrateCards(capture.Items, spawnMessage, Data.Run?.Player?.TryCast<IPlayer>());
+    }
+
+    internal static void RehydrateOpponentCards(
+        PvpBattleManifest manifest,
+        NetMessageGameSim spawnMessage,
+        IReplayPlaybackOutcomeSink outcome
+    )
+    {
+        var capture = manifest.Snapshots.OpponentHand;
+        if (capture.Status == PvpBattleCaptureStatus.Missing)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentSnapshotUnavailable);
+            return;
+        }
+
+        RehydrateCards(capture.Items, spawnMessage, Data.Run?.Opponent?.TryCast<IPlayer>());
+    }
+
+    internal static void RehydratePlayerSkills(
+        PvpBattleManifest manifest,
+        NetMessageGameSim spawnMessage,
+        IReplayPlaybackOutcomeSink outcome
+    )
+    {
+        var capture = manifest.Snapshots.PlayerSkills;
+        if (capture.Status == PvpBattleCaptureStatus.Missing)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.PlayerSkillsUnavailable);
+            return;
+        }
+
+        var skills = RehydrateSkillCards(capture.Items, spawnMessage, Data.Run?.Player?.TryCast<IPlayer>());
+        ReplaceSkillCollection(Data.Run?.Player?.TryCast<IPlayer>(), skills);
+    }
+
+    internal static void RehydrateOpponentSkills(
+        PvpBattleManifest manifest,
+        NetMessageGameSim spawnMessage,
+        IReplayPlaybackOutcomeSink outcome
+    )
+    {
+        var capture = manifest.Snapshots.OpponentSkills;
+        if (capture.Status == PvpBattleCaptureStatus.Missing)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentSkillsUnavailable);
+            return;
+        }
+
+        var skills = RehydrateSkillCards(capture.Items, spawnMessage, Data.Run?.Opponent?.TryCast<IPlayer>());
+        ReplaceSkillCollection(Data.Run?.Opponent?.TryCast<IPlayer>(), skills);
+    }
+
+    internal static void SanitizeSpawnEvents(CombatSequenceMessages sequence, string? battleId)
+    {
+        var events = sequence.SpawnMessage?.Data?.Events;
+        if (events == null || events.Count == 0)
+            return;
+
+        var removedCount = events.RemoveAll(BppDelegates.Predicate<IGameSimEvent>(ShouldRemoveSpawnEvent));
+        if (removedCount > 0)
+            BppLog.DebugEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.CombatReplay,
+                    "combat_replay.playback.cleanup_observed"
+                ),
+                () =>
+                    [
+                        ("stage", "spawn_sanitization"),
+                        ("removed_count", removedCount),
+                        ("battle_id", battleId, BppLogCorrelationPolicy.Short),
+                    ]
+            );
+    }
+
+    private static bool ShouldRemoveSpawnEvent(IGameSimEvent gameSimEvent)
+    {
+        var spawned = gameSimEvent.TryCast<GameSimEventCardSpawned>();
+        return spawned != null
+            && spawned.CombatantId == ECombatantId.Opponent
+            && spawned.Type != ECardType.SocketEffect
+            && spawned.Section.ToManagedNullable() != EInventorySection.Hand;
+    }
+
+    private static void RehydrateCards(
+        IEnumerable<PvpBattleCardSnapshot> snapshots,
+        NetMessageGameSim spawnMessage,
+        IPlayer? owner
+    )
+    {
+        foreach (var snapshot in snapshots.Where(snapshot => snapshot != null))
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.InstanceId))
+                continue;
+
+            var card = Data.GetOrCreateCard(
+                snapshot.InstanceId,
+                snapshot.TemplateId,
+                snapshot.Type
+            );
+            if (spawnMessage.Data.Cards.TryGetValue(snapshot.InstanceId, out var simUpdate))
+                card.Update(simUpdate);
+
+            ApplySnapshotFallback(card, snapshot);
+            card.Size = snapshot.Size;
+            card.Owner = owner;
+            if (snapshot.Section is { } section)
+                card.Section = section.ToNativeNullable();
+            if (snapshot.Socket is { } socket)
+                card.LeftSocketId = socket.ToNativeNullable();
+        }
+    }
+
+    private static List<SkillCard> RehydrateSkillCards(
+        IEnumerable<PvpBattleCardSnapshot> snapshots,
+        NetMessageGameSim spawnMessage,
+        IPlayer? owner
+    )
+    {
+        var skills = new List<SkillCard>();
+        foreach (var snapshot in snapshots.Where(snapshot => snapshot != null))
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.InstanceId))
+                continue;
+
+            var card = Data.GetOrCreateCard(
+                snapshot.InstanceId,
+                snapshot.TemplateId,
+                snapshot.Type
+            );
+            if (spawnMessage.Data.Cards.TryGetValue(snapshot.InstanceId, out var simUpdate))
+                card.Update(simUpdate);
+
+            ApplySnapshotFallback(card, snapshot);
+            card.Size = snapshot.Size;
+            card.Owner = owner;
+            if (snapshot.Section is { } section)
+                card.Section = section.ToNativeNullable();
+            if (snapshot.Socket is { } socket)
+                card.LeftSocketId = socket.ToNativeNullable();
+
+            if (card.AsIl2Cpp<SkillCard>() is { } skillCard)
+                skills.Add(skillCard);
+        }
+
+        return skills;
+    }
+
+    private static void ApplySnapshotFallback(Card card, PvpBattleCardSnapshot snapshot)
+    {
+        if (snapshot.Attributes != null && snapshot.Attributes.Count > 0)
+        {
+            foreach (var entry in snapshot.Attributes)
+            {
+                if (
+                    Enum.TryParse<ECardAttributeType>(
+                        entry.Key,
+                        ignoreCase: false,
+                        out var attributeType
+                    )
+                )
+                    card.Attributes[attributeType] = entry.Value;
+            }
+        }
+
+        if (snapshot.Tags != null && snapshot.Tags.Count > 0)
+        {
+            card.Tags = snapshot
+                .Tags.Select(tag =>
+                    Enum.TryParse<ECardTag>(tag, ignoreCase: false, out var parsedTag)
+                        ? (ECardTag?)parsedTag
+                        : null
+                )
+                .Where(tag => tag.HasValue)
+                .Select(tag => tag!.Value)
+                .ToNativeHashSet();
+        }
+
+        if (
+            !string.IsNullOrWhiteSpace(snapshot.Tier)
+            && Enum.TryParse<ETier>(snapshot.Tier, ignoreCase: false, out var tier)
+        )
+            card.Tier = tier;
+
+        if (
+            card.AsIl2Cpp<ItemCard>() is { } itemCard
+            && !string.IsNullOrWhiteSpace(snapshot.Enchant)
+            && Enum.TryParse<EEnchantmentType>(
+                snapshot.Enchant,
+                ignoreCase: false,
+                out var enchantment
+            )
+        )
+            itemCard.Enchantment = enchantment.ToNativeNullable();
+    }
+
+    private static void ReplaceSkillCollection(object? combatant, IReadOnlyList<SkillCard> skills)
+    {
+        if (combatant == null)
+            return;
+
+#if BPP_ANDROID
+        var player = combatant.AsIl2Cpp<BazaarGameClient.Domain.Models.Player>();
+        if (player != null)
+            player.Skills = skills.ToNativeList();
+#else
+        var skillsProperty = combatant
+            .GetType()
+            .GetProperty(
+                "Skills",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+        if (skillsProperty == null)
+            return;
+
+        if (skillsProperty.CanWrite)
+        {
+            skillsProperty.SetValue(combatant, skills.ToList());
+            return;
+        }
+
+        if (skillsProperty.GetValue(combatant) is System.Collections.IList list)
+        {
+            list.Clear();
+            foreach (var skill in skills)
+                list.Add(skill);
+        }
+#endif
+    }
+}

@@ -1,0 +1,46 @@
+name = "bazaarplusplus-mod-api-v6"
+main = "src/index.ts"
+compatibility_date = "2026-08-02"
+workers_dev = false
+
+[triggers]
+# */15 runs D1 retention; 23 * * * * starts the analyzer workflow
+# (src/modules/analyzer-dispatch.ts, ANALYZER_DISPATCH_CRON).
+crons = ["*/15 * * * *", "23 * * * *"]
+
+[placement]
+region = "aws:ap-east-1"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+head_sampling_rate = 1.0
+
+[vars]
+R2_ACCOUNT_ID = "ea3913fc761734a6851a53732cbe7701"
+
+[[routes]]
+pattern = "mod-api-v6.bazaarplusplus.com"
+custom_domain = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bazaarplusplus-mod-api-v6-db"
+database_id = "1ad61742-bfcc-4d0f-8207-adc89f115134"
+migrations_dir = "migrations-v6"
+
+[[r2_buckets]]
+binding = "BUNDLE_BUCKET"
+bucket_name = "bazaarplusplus-bundle-v6"
+
+[[ratelimits]]
+name = "GHOST_BATTLE_RATE_LIMITER"
+# Unique in the account; 1001 is already taken there.
+namespace_id = "1002"
+
+[ratelimits.simple]
+limit = 60
+period = 60

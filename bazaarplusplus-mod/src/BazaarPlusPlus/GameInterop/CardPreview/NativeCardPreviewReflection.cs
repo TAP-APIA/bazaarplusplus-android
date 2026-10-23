@@ -1,0 +1,263 @@
+#nullable enable
+using System.Reflection;
+using BazaarGameClient.Domain.Models.Cards;
+using BazaarGameShared.Domain.Cards;
+using HarmonyLib;
+using TheBazaar.Tooltips;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace BazaarPlusPlus.GameInterop.CardPreview;
+
+internal static class NativeCardPreviewReflection
+{
+    private const string CardPreviewBaseTypeName = "TheBazaar.UI.CardPreviewBase";
+
+    public static readonly Type? CardPreviewBaseType = AccessTools.TypeByName(
+        CardPreviewBaseTypeName
+    );
+
+    public static readonly MethodInfo? SetUpMethod =
+        CardPreviewBaseType != null
+            ? AccessTools.Method(
+                CardPreviewBaseType,
+                "SetUp",
+                [
+                    typeof(TCardBase),
+                    typeof(bool),
+                    typeof(TCardInstance),
+#if BPP_ANDROID
+                    typeof(Il2CppSystem.Threading.CancellationToken),
+#else
+                    typeof(CancellationToken),
+#endif
+                ]
+            )
+            : null;
+
+    public static readonly MethodInfo? ShowMethod =
+        CardPreviewBaseType != null ? AccessTools.Method(CardPreviewBaseType, "Show") : null;
+
+    public static readonly MethodInfo? OnHoverMethod =
+        CardPreviewBaseType != null ? AccessTools.Method(CardPreviewBaseType, "OnHover") : null;
+
+    public static readonly MethodInfo? OnHoverOutMethod =
+        CardPreviewBaseType != null ? AccessTools.Method(CardPreviewBaseType, "OnHoverOut") : null;
+
+    public static readonly MethodInfo? ResizeMethod =
+        CardPreviewBaseType != null ? AccessTools.Method(CardPreviewBaseType, "Resize") : null;
+
+    private static readonly BppFieldAccessor? TooltipDataField =
+        CardPreviewBaseType != null ? BppFieldAccessor.Find(CardPreviewBaseType, "_tooltipData") : null;
+
+    private static readonly BppFieldAccessor? ClientCardField =
+        CardPreviewBaseType != null ? BppFieldAccessor.Find(CardPreviewBaseType, "_clientCard") : null;
+
+    private static readonly BppFieldAccessor? CardImageField =
+        CardPreviewBaseType != null ? BppFieldAccessor.Find(CardPreviewBaseType, "_cardImage") : null;
+
+    public static bool TryGetArtworkRect(
+        RectTransform preview,
+        out RectTransform artwork,
+        bool requireVisible = true
+    )
+    {
+        artwork = null!;
+        if (preview == null || CardPreviewBaseType == null || CardImageField == null)
+            return false;
+
+        try
+        {
+            var cardPreview = BppGameObjectFactory.GetComponent(preview.gameObject, CardPreviewBaseType);
+            if (cardPreview == null || CardImageField.GetValue<RawImage>(cardPreview) is not { } image)
+                return false;
+
+            artwork = image.rectTransform;
+            return artwork != null && (!requireVisible || artwork.gameObject.activeInHierarchy);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool TryGetTooltipData(
+        Component cardPreview,
+        out CardTooltipData tooltipData,
+        Action<NativeCardPreviewFailure>? reportFailure = null
+    )
+    {
+        tooltipData = null!;
+        if (!IsCardPreview(cardPreview) || TooltipDataField == null)
+        {
+            ReportUnavailable(reportFailure, NativeCardPreviewOperation.GetTooltipData);
+            return false;
+        }
+
+        try
+        {
+            if (TooltipDataField.GetValue(cardPreview) is not CardTooltipData value)
+                return false;
+
+            tooltipData = value;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ReportException(reportFailure, NativeCardPreviewOperation.GetTooltipData, ex);
+            return false;
+        }
+    }
+
+    public static bool TryGetClientCard(
+        Component cardPreview,
+        out Card card,
+        Action<NativeCardPreviewFailure>? reportFailure = null
+    )
+    {
+        card = null!;
+        if (!IsCardPreview(cardPreview) || ClientCardField == null)
+        {
+            ReportUnavailable(reportFailure, NativeCardPreviewOperation.GetClientCard);
+            return false;
+        }
+
+        try
+        {
+            if (ClientCardField.GetValue(cardPreview) is not Card value)
+                return false;
+
+            card = value;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ReportException(reportFailure, NativeCardPreviewOperation.GetClientCard, ex);
+            return false;
+        }
+    }
+
+    public static bool TrySetTooltipData(
+        Component cardPreview,
+        CardTooltipData tooltipData,
+        Action<NativeCardPreviewFailure>? reportFailure = null
+    )
+    {
+        if (!IsCardPreview(cardPreview) || TooltipDataField == null || tooltipData == null)
+        {
+            ReportUnavailable(reportFailure, NativeCardPreviewOperation.SetTooltipData);
+            return false;
+        }
+
+        try
+        {
+            TooltipDataField.SetValue(cardPreview, tooltipData);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ReportException(reportFailure, NativeCardPreviewOperation.SetTooltipData, ex);
+            return false;
+        }
+    }
+
+    public static bool TryInvokeOnHover(
+        Component cardPreview,
+        Action<NativeCardPreviewFailure>? reportFailure = null
+    ) =>
+        TryInvoke(
+            cardPreview,
+            OnHoverMethod,
+            NativeCardPreviewOperation.InvokeHover,
+            reportFailure
+        );
+
+    public static bool TryInvokeOnHoverOut(
+        Component cardPreview,
+        Action<NativeCardPreviewFailure>? reportFailure = null
+    ) =>
+        TryInvoke(
+            cardPreview,
+            OnHoverOutMethod,
+            NativeCardPreviewOperation.InvokeHoverOut,
+            reportFailure
+        );
+
+    private static bool TryInvoke(
+        Component cardPreview,
+        MethodInfo? method,
+        NativeCardPreviewOperation operation,
+        Action<NativeCardPreviewFailure>? reportFailure
+    )
+    {
+        if (!IsCardPreview(cardPreview) || method == null)
+        {
+            ReportUnavailable(reportFailure, operation);
+            return false;
+        }
+
+        try
+        {
+            method.Invoke(cardPreview, Array.Empty<object>());
+            return true;
+        }
+        catch (TargetInvocationException ex)
+        {
+            ReportException(reportFailure, operation, ex.InnerException ?? ex);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            ReportException(reportFailure, operation, ex);
+            return false;
+        }
+    }
+
+    private static void ReportUnavailable(
+        Action<NativeCardPreviewFailure>? reportFailure,
+        NativeCardPreviewOperation operation
+    ) =>
+        reportFailure?.Invoke(
+            new NativeCardPreviewFailure(
+                operation,
+                NativeCardPreviewFailureReason.ReflectionUnavailable,
+                templateId: null
+            )
+        );
+
+    private static void ReportException(
+        Action<NativeCardPreviewFailure>? reportFailure,
+        NativeCardPreviewOperation operation,
+        Exception exception
+    ) =>
+        reportFailure?.Invoke(
+            new NativeCardPreviewFailure(
+                operation,
+                NativeCardPreviewFailureReason.ReflectionException,
+                templateId: null,
+                exception
+            )
+        );
+
+    public static void ApplyLayerRecursive(GameObject root, int layer)
+    {
+        if (root == null)
+            return;
+
+        root.layer = layer;
+        var transform = root.transform;
+        for (var i = 0; i < transform.childCount; i++)
+        {
+            var child = transform.GetChild(i);
+            if (child != null)
+                ApplyLayerRecursive(child.gameObject, layer);
+        }
+    }
+
+    private static bool IsCardPreview(Component cardPreview)
+    {
+        return cardPreview != null
+            && CardPreviewBaseType != null
+            && CardPreviewBaseType.IsInstanceOfType(cardPreview);
+    }
+}

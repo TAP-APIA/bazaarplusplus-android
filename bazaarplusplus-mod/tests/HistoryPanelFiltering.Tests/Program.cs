@@ -1,0 +1,936 @@
+#nullable enable
+using System.Collections;
+using System.Reflection;
+using BazaarPlusPlus.Storage.RunLog;
+using Microsoft.Data.Sqlite;
+
+using var uiContext = new TestUiContext();
+SynchronizationContext.SetSynchronizationContext(uiContext);
+
+var modAssembly = Assembly.Load("BazaarPlusPlus");
+var stateType = RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelState");
+var runRecordType = RequireType("BazaarPlusPlus.Game.HistoryPanel.Data.HistoryRunRecord");
+var battleRecordType = RequireType("BazaarPlusPlus.Game.HistoryPanel.Data.HistoryBattleRecord");
+var snapshotCountsType = RequireType(
+    "BazaarPlusPlus.Game.HistoryPanel.Data.HistoryBattleSnapshotCounts"
+);
+var battleSourceType = RequireType("BazaarPlusPlus.Game.HistoryPanel.Data.HistoryBattleSource");
+var ghostFilterType = RequireType("BazaarPlusPlus.Game.HistoryPanel.GhostBattleFilter");
+var heroPresentationType = RequireType(
+    "BazaarPlusPlus.Game.HistoryPanel.HistoryPanelHeroPresentation"
+);
+var coordinatorType = RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelCoordinator");
+var dependenciesType = RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelDependencies");
+var dataServiceType = RequireType(
+    "BazaarPlusPlus.Game.HistoryPanel.Storage.HistoryPanelDataService"
+);
+var cursorType = RequireType("BazaarPlusPlus.Game.HistoryPanel.Storage.HistoryCursor");
+
+TestRunHeroRosterAddsOneCanonicalTheDragonsAfterTheExistingSeven();
+TestRunHeroPresentationTreatsAliasesAsSelectedAndDisplaysCanonicalName();
+TestCoordinatorCanonicalizesAliasFilterState();
+TestStateSelectedRunUsesFilteredRunList();
+TestPageReplacementUpdatesSelection();
+TestCoordinatorRunSelectionUsesFilteredSpace();
+TestReplayReturnPreservesSelectionAndFilters();
+TestGhostListTextMarksOnlyTheFinalBattle();
+TestRunRatingShowsItsChangeOnlyWhenKnown();
+TestAccountArrivalSyncsOnlyTheOpenGhostSection();
+TestAccountLinkActionHandsAccountChangeToTheObserver();
+TestFailedSyncMarksTheEmptyGhostListIncomplete();
+TestSessionBoundariesRestartACancelledSync();
+TestAccountChangeMidSyncSyncsTheNewAccount();
+
+Console.WriteLine("HistoryPanelFiltering checks passed.");
+
+void TestRunHeroRosterAddsOneCanonicalTheDragonsAfterTheExistingSeven()
+{
+    var roster = (IEnumerable)
+        heroPresentationType
+            .GetProperty(
+                "RunFilterHeroIds",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+            )!
+            .GetValue(null)!;
+    var heroIds = roster.Cast<string>().ToArray();
+
+    Assert(
+        heroIds.SequenceEqual([
+            "Vanessa",
+            "Pygmalien",
+            "Dooley",
+            "Mak",
+            "Jules",
+            "Karnok",
+            "Stelle",
+            "TheDragons",
+        ]),
+        "History should preserve the existing seven hero order and append one canonical The Dragons chip."
+    );
+    Assert(
+        heroIds.Count(hero => hero == "TheDragons") == 1,
+        "History should expose exactly one canonical The Dragons chip."
+    );
+    Assert(
+        !heroIds.Contains("Hero8"),
+        "History should never expose a separate legacy The Dragons chip."
+    );
+}
+
+void TestRunHeroPresentationTreatsAliasesAsSelectedAndDisplaysCanonicalName()
+{
+    Assert(
+        (bool)InvokeStatic(heroPresentationType, "IsSelected", "Hero8", "TheDragons")!,
+        "A canonical chip should stay selected for legacy filter state."
+    );
+    Assert(
+        (bool)InvokeStatic(heroPresentationType, "IsSelected", "TheDragons", "Hero8")!,
+        "Alias-selected state should be symmetric."
+    );
+    Assert(
+        (string)InvokeStatic(heroPresentationType, "DisplayName", "Hero8")! == "The Dragons",
+        "Legacy history should display the canonical native The Dragons name."
+    );
+    Assert(
+        (string)InvokeStatic(heroPresentationType, "DisplayName", "TheDragons")! == "The Dragons",
+        "Canonical history should display the native The Dragons name."
+    );
+}
+
+void TestCoordinatorCanonicalizesAliasFilterState()
+{
+    var state =
+        Activator.CreateInstance(stateType)
+        ?? throw new InvalidOperationException("HistoryPanelState should construct.");
+    var dataService = Construct(dataServiceType, null, null);
+    var dependencies = Construct(dependenciesType, null, dataService, null, null, null, null);
+    var coordinator =
+        Activator.CreateInstance(
+            coordinatorType,
+            state,
+            dependencies,
+            (Action)(() => { }),
+            (Action)(() => { }),
+            (Action<bool>)(_ => { })
+        ) ?? throw new InvalidOperationException("HistoryPanelCoordinator should construct.");
+
+    Invoke(coordinatorType, coordinator, "SetRunHeroFilter", "Hero8");
+    Assert(
+        GetNullableString(state, "SelectedRunHero") == "TheDragons",
+        "Legacy filter input should persist as canonical History UI state."
+    );
+
+    Invoke(coordinatorType, coordinator, "SetRunHeroFilter", "TheDragons");
+    Assert(
+        GetNullableString(state, "SelectedRunHero") == null,
+        "Selecting either alias again should toggle the canonical filter off."
+    );
+}
+
+void TestStateSelectedRunUsesFilteredRunList()
+{
+    var state =
+        Activator.CreateInstance(stateType)
+        ?? throw new InvalidOperationException("HistoryPanelState should construct.");
+    stateType.GetProperty("SelectedRunIndex")!.SetValue(state, 1);
+
+    var runs = CreateRunList(CreateRun("raw-1", "Vanessa"), CreateRun("raw-3", "Vanessa"));
+    var selected = Invoke(stateType, state, "GetSelectedRun", runs);
+
+    Assert(GetString(selected, "RunId") == "raw-3", "Selected run should come from filtered runs.");
+}
+
+void TestPageReplacementUpdatesSelection()
+{
+    foreach (var pageName in new[] { "RunPage", "BattlePage", "GhostPage" })
+    {
+        var state = Activator.CreateInstance(stateType)!;
+        var isRun = pageName == "RunPage";
+        var rowsName =
+            isRun ? "Runs"
+            : pageName == "BattlePage" ? "Battles"
+            : "GhostBattles";
+        var selectedMethod =
+            isRun ? "GetSelectedRun"
+            : pageName == "BattlePage" ? "GetSelectedBattle"
+            : "GetSelectedGhostBattle";
+        object? Selected() =>
+            rowsName == "Battles"
+                ? Invoke(stateType, state, selectedMethod)
+                : Invoke(stateType, state, selectedMethod, GetList(state, rowsName));
+        var first = isRun ? CreateRun("first", "Vanessa") : CreateBattle("first", 10, "Won");
+        var next = isRun ? CreateRun("next", "Mak") : CreateBattle("next", 12, "Lost");
+        SetPage(state, pageName, first);
+        Assert(ReferenceEquals(Selected(), first), "Selection must read the published page.");
+        SetPage(state, pageName, next);
+        Assert(
+            GetList(state, rowsName).Count == 1 && ReferenceEquals(Selected(), next),
+            "Replacing a page must replace its visible rows and selection together."
+        );
+        SetPage(state, pageName);
+        Assert(
+            GetList(state, rowsName).Count == 0 && Selected() == null,
+            "Clearing a page must not retain a row selected from the previous page."
+        );
+    }
+}
+
+void TestCoordinatorRunSelectionUsesFilteredSpace()
+{
+    var state =
+        Activator.CreateInstance(stateType)
+        ?? throw new InvalidOperationException("HistoryPanelState should construct.");
+    SetPage(state, "RunPage", CreateRun("raw-1", "Vanessa"), CreateRun("raw-3", "Vanessa"));
+    stateType.GetProperty("SelectedRunHero")!.SetValue(state, "Vanessa");
+
+    var dataService = Construct(dataServiceType, null, null);
+    var dependencies = Construct(dependenciesType, null, dataService, null, null, null, null);
+    var coordinator =
+        Activator.CreateInstance(
+            coordinatorType,
+            state,
+            dependencies,
+            (Action)(() => { }),
+            (Action)(() => { }),
+            (Action<bool>)(_ => { })
+        ) ?? throw new InvalidOperationException("HistoryPanelCoordinator should construct.");
+
+    Invoke(coordinatorType, coordinator, "SelectRun", 1);
+    var selected = Invoke(coordinatorType, coordinator, "GetSelectedRun");
+
+    Assert(
+        GetString(selected, "RunId") == "raw-3",
+        "SelectRun should interpret indexes in the current filtered database page."
+    );
+}
+
+void TestReplayReturnPreservesSelectionAndFilters()
+{
+    var state = Activator.CreateInstance(stateType)!;
+    var firstRun = CreateRun("run-1", "Vanessa");
+    var selectedRun = CreateRun("run-2", "Vanessa");
+    var selectedBattle = CreateBattle("battle-2", 12, "Lost");
+    SetPage(state, "RunPage", firstRun, selectedRun);
+    SetPage(state, "BattlePage", CreateBattle("battle-1", 11, "Won"), selectedBattle);
+    stateType.GetProperty("SelectedRunIndex")!.SetValue(state, 1);
+    stateType.GetProperty("SelectedBattleIndex")!.SetValue(state, 1);
+    stateType.GetProperty("SelectedGhostBattleIndex")!.SetValue(state, 2);
+    stateType.GetProperty("SelectedRunHero")!.SetValue(state, "Vanessa");
+    stateType.GetProperty("GhostDayMin10")!.SetValue(state, true);
+    stateType
+        .GetProperty("GhostBattleFilter")!
+        .SetValue(state, Enum.Parse(ghostFilterType, "ILost"));
+    var databasePath = Path.Combine(
+        Path.GetTempPath(),
+        $"bpp-history-selection-{Guid.NewGuid():N}.sqlite3"
+    );
+    using var db = new SqliteConnection($"Data Source={databasePath}");
+    db.Open();
+    RunLogSchema.EnsureInitialized(db);
+    using (var command = db.CreateCommand())
+    {
+        command.CommandText = """
+            INSERT INTO runs (run_id,hero,game_mode,status,started_at_ms,last_seen_at_ms)
+            VALUES ('run-1','Vanessa','Ranked','completed',1767225600000,1767225600000),
+                ('run-2','Vanessa','Ranked','completed',1767312000000,1767312000000);
+            INSERT INTO battles (battle_id,run_id,source,recorded_at_ms,combat_kind,local_payload_state)
+            VALUES ('battle-1','run-2','LOCAL',1767312000000,'PVPCombat','missing'),
+                ('battle-2','run-2','LOCAL',1767225600000,'PVPCombat','missing');
+            """;
+        command.ExecuteNonQuery();
+    }
+    var repository = Construct(
+        RequireType("BazaarPlusPlus.Game.HistoryPanel.Storage.HistoryPanelRepository"),
+        databasePath
+    );
+    var dataService = Construct(dataServiceType, repository, null);
+    var dependencies = Construct(dependenciesType, null, dataService, null, null, null, null);
+    var previewRequests = 0;
+    using var coordinator = (IDisposable)
+        Activator.CreateInstance(
+            coordinatorType,
+            state,
+            dependencies,
+            (Action)(() => { }),
+            (Action)(() => previewRequests++),
+            (Action<bool>)(_ => { })
+        )!;
+
+    // This capsule has no Unity PlayerPrefs; exercise the panel as a signed-out client.
+    var bridge = RequireType("BazaarPlusPlus.GameInterop.BppClientCacheBridge");
+    var cacheType = bridge.GetField(
+        "_clientCacheType",
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+    var resolved = bridge.GetField(
+        "_clientCacheTypeResolved",
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+    var previousType = cacheType.GetValue(null);
+    var previousResolved = resolved.GetValue(null);
+    cacheType.SetValue(null, null);
+    resolved.SetValue(null, true);
+    try
+    {
+        Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        previewRequests = 0;
+        Invoke(coordinatorType, coordinator, "OnPanelShown", true);
+        uiContext.Until(() =>
+            stateType.GetProperty("DetailBattleId")!.GetValue(state)?.ToString() == "battle-2"
+            && !(bool)stateType.GetProperty("DetailLoading")!.GetValue(state)!
+        );
+
+        Assert(
+            GetList(state, "Runs").Count == 2
+                && GetString(Invoke(coordinatorType, coordinator, "GetSelectedRun"), "RunId")
+                    == "run-2",
+            "Returning from replay must reload the page and retain the selected run by ID."
+        );
+        Assert(
+            GetString(Invoke(stateType, state, "GetSelectedBattle"), "BattleId") == "battle-2",
+            "Returning from replay must retain the selected battle, not the latest battle."
+        );
+        Assert(
+            (int)stateType.GetProperty("SelectedRunIndex")!.GetValue(state)! == 0,
+            "Reloading may change the selected index while retaining run identity."
+        );
+        Assert(
+            GetNullableString(state, "SelectedRunHero") == "Vanessa"
+                && (bool)stateType.GetProperty("GhostDayMin10")!.GetValue(state)!
+                && stateType.GetProperty("GhostBattleFilter")!.GetValue(state)!.ToString()
+                    == "ILost"
+                && (int)stateType.GetProperty("SelectedGhostBattleIndex")!.GetValue(state)! == 2,
+            "Returning from replay must retain both run and ghost filters and selection."
+        );
+        Assert(
+            previewRequests > 0,
+            "Returning from replay must refresh the selected preview after loading its detail."
+        );
+
+        Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+        uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+        Assert(
+            GetList(state, "Runs").Count == 2
+                && !ReferenceEquals(GetList(state, "Runs")[0], selectedRun),
+            "A normal panel open must read persisted records."
+        );
+
+        SetPage(state, "GhostPage", CreateBattle("previous-account-battle", 12, "Won"));
+        stateType.GetProperty("CachedAccountId")!.SetValue(state, "previous-account");
+        Invoke(coordinatorType, coordinator, "Tick", 0f);
+        Assert(
+            GetList(state, "GhostBattles").Count == 0
+                && Invoke(
+                    stateType,
+                    state,
+                    "GetSelectedGhostBattle",
+                    GetList(state, "GhostBattles")
+                ) == null,
+            "An account change must immediately clear the old Ghost page and its selection."
+        );
+        Invoke(coordinatorType, coordinator, "OnPanelHidden");
+    }
+    finally
+    {
+        DisposeAndDrainReads(coordinator);
+        cacheType.SetValue(null, previousType);
+        resolved.SetValue(null, previousResolved);
+        db.Close();
+        SqliteConnection.ClearAllPools();
+        File.Delete(databasePath);
+    }
+}
+
+void TestAccountArrivalSyncsOnlyTheOpenGhostSection()
+{
+    WithProfileCapsule(
+        "Ghost",
+        (state, coordinator, syncAttempts) =>
+        {
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+            Assert(syncAttempts() == 1, "Entering Ghost before the profile loads tries one sync.");
+
+            FakeClientCache.SetAccountId("account-arrived");
+            Invoke(coordinatorType, coordinator, "Tick", 0f);
+            Assert(
+                syncAttempts() == 2,
+                "The profile account arriving while Ghost is open must sync Ghost battles."
+            );
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+            Assert(
+                GetNullableString(state, "CachedAccountId") == "account-arrived",
+                "The Ghost list must reload for the arrived account."
+            );
+
+            Invoke(coordinatorType, coordinator, "Tick", 0f);
+            Assert(syncAttempts() == 2, "An unchanged account must not sync again.");
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        }
+    );
+
+    WithProfileCapsule(
+        "Ghost",
+        (state, coordinator, syncAttempts) =>
+        {
+            FakeClientCache.SetAccountId("account-known");
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            Invoke(coordinatorType, coordinator, "Tick", 0f);
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+            Assert(
+                syncAttempts() == 1,
+                "Opening Ghost with a new account adopts it in the opening session and syncs once."
+            );
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        }
+    );
+
+    WithProfileCapsule(
+        "Runs",
+        (state, coordinator, syncAttempts) =>
+        {
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+
+            FakeClientCache.SetAccountId("account-arrived");
+            Invoke(coordinatorType, coordinator, "Tick", 0f);
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+            Assert(
+                syncAttempts() == 0,
+                "The profile account arriving while Runs is open must not sync Ghost battles."
+            );
+            Assert(
+                GetNullableString(state, "CachedAccountId") == "account-arrived",
+                "Runs must still observe the arrived account."
+            );
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        }
+    );
+}
+
+void TestAccountLinkActionHandsAccountChangeToTheObserver()
+{
+    WithProfileCapsule(
+        "Ghost",
+        (state, coordinator, syncAttempts) =>
+        {
+            // The signed-out Ghost read is still in flight when the account-link row reads the
+            // profile; that read must not strand the list in its loading state.
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            Assert(syncAttempts() == 1, "Entering Ghost before the profile loads tries one sync.");
+
+            FakeClientCache.SetAccountId("account-linked");
+            Invoke(coordinatorType, coordinator, "ToggleAccountLinkForm");
+            Assert(
+                syncAttempts() == 2,
+                "An account change first seen by the account-link row must still sync Ghost battles."
+            );
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+            Assert(
+                GetNullableString(state, "CachedAccountId") == "account-linked",
+                "The Ghost list must reload for the account the link row saw."
+            );
+
+            Invoke(coordinatorType, coordinator, "Tick", 0f);
+            Assert(syncAttempts() == 2, "The next tick must not handle the same change again.");
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        }
+    );
+}
+
+void TestFailedSyncMarksTheEmptyGhostListIncomplete()
+{
+    WithProfileCapsule(
+        "Ghost",
+        (state, coordinator, syncAttempts) =>
+        {
+            FakeClientCache.SetAccountId("account-known");
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            uiContext.Until(() => !(bool)stateType.GetProperty("PageLoading")!.GetValue(state)!);
+            Assert(
+                syncAttempts() == 1 && GhostSync(state) == "Failed",
+                "The capsule's Ghost sync fails for want of an account id."
+            );
+            Assert(
+                ArchiveListMessage(state) == HistoryText("GhostSyncIncomplete"),
+                "An empty Ghost list after a failed sync must not claim nothing is saved."
+            );
+            Assert(
+                GetNullableString(state, "StatusMessage")?.Contains("player_account_id_unavailable")
+                    == true,
+                "The status bar must keep the sync failure detail."
+            );
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        }
+    );
+}
+
+// A sync cancelled by its session returns without touching state, so each session boundary must
+// reset the phase; otherwise the next entry reports "already running" and never syncs again.
+void TestSessionBoundariesRestartACancelledSync()
+{
+    WithProfileCapsule(
+        "Ghost",
+        (state, coordinator, syncAttempts) =>
+        {
+            FakeClientCache.SetAccountId("account-known");
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            Assert(
+                syncAttempts() == 1 && GhostSync(state) == "Running",
+                "The held Ghost sync stays in flight."
+            );
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+            Assert(GhostSync(state) == "NotStarted", "Closing History ends the sync phase.");
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            AssertSyncRestarted(state, syncAttempts, "Reopening History after a cancelled sync");
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        },
+        holdSync: true
+    );
+}
+
+// ObserveAccount cancels the old account's sync and starts the new one before the cancelled request
+// has unwound; the new sync must wait for it instead of failing as already running.
+void TestAccountChangeMidSyncSyncsTheNewAccount()
+{
+    WithProfileCapsule(
+        "Ghost",
+        (state, coordinator, syncAttempts) =>
+        {
+            FakeClientCache.SetAccountId("account-a");
+            Invoke(coordinatorType, coordinator, "OnPanelShown", false);
+            Assert(
+                syncAttempts() == 1 && GhostSync(state) == "Running",
+                "The held Ghost sync stays in flight."
+            );
+            FakeClientCache.SetAccountId("account-b");
+            Invoke(coordinatorType, coordinator, "Tick", 0f);
+            AssertSyncRestarted(state, syncAttempts, "A profile change during a sync");
+            Invoke(coordinatorType, coordinator, "OnPanelHidden");
+        },
+        holdSync: true
+    );
+}
+
+// The cancelled request is still unwinding when the new session starts its sync, so that sync first
+// waits in place; once the UI context lets the old request finish, the new one reaches the server.
+void AssertSyncRestarted(object state, Func<int> syncAttempts, string when)
+{
+    Assert(
+        GetNullableString(state, "StatusMessage") != HistoryText("GhostSyncAlreadyRunning")
+            && GhostSync(state) == "Running"
+            && syncAttempts() == 1,
+        $"{when} must queue a new sync behind the cancelled one, not fail it."
+    );
+    uiContext.Until(() => syncAttempts() == 2);
+    Assert(GhostSync(state) == "Running", $"{when} must run the new sync.");
+}
+
+string GhostSync(object state) => stateType.GetProperty("GhostSync")!.GetValue(state)!.ToString()!;
+
+string HistoryText(string name) =>
+    (string)InvokeStatic(RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelText"), name)!;
+
+string ArchiveListMessage(object state)
+{
+    var board = Activator.CreateInstance(
+        RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryBoardFacts")
+    );
+    var facts = InvokeStatic(
+        RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryArchiveFacts"),
+        "Observe",
+        state,
+        null,
+        board,
+        board
+    );
+    var status = InvokeStatic(
+        RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelDecisions"),
+        "ArchiveStatus",
+        facts
+    );
+    return GetString(status, "ListMessage")!;
+}
+
+// A History capsule whose game profile is a settable fake and whose Ghost sync service counts
+// attempts: the account resolver runs once per sync. By default it reports no identity, so the sync
+// fails before any request; holdSync supplies one and holds the request until its session ends.
+void WithProfileCapsule(
+    string section,
+    Action<object, IDisposable, Func<int>> body,
+    bool holdSync = false
+)
+{
+    var databasePath = Path.Combine(
+        Path.GetTempPath(),
+        $"bpp-history-account-{Guid.NewGuid():N}.sqlite3"
+    );
+    using (var db = new SqliteConnection($"Data Source={databasePath}"))
+    {
+        db.Open();
+        RunLogSchema.EnsureInitialized(db);
+    }
+    var repository = Construct(
+        RequireType("BazaarPlusPlus.Game.HistoryPanel.Storage.HistoryPanelRepository"),
+        databasePath
+    );
+    using var api =
+        BazaarPlusPlus.ModApi.Clients.ModApiSession.TryCreate(
+            "https://api.example",
+            "test",
+            "OnlineClient",
+            TimeSpan.FromSeconds(5),
+            holdSync ? new HoldingHandler() : new RefusingHandler()
+        ) ?? throw new InvalidOperationException("Test Mod API session should construct.");
+    var syncAttempts = 0;
+    var syncService = Construct(
+        RequireType("BazaarPlusPlus.Game.HistoryPanel.Ghost.GhostBattleSyncService"),
+        repository,
+        api,
+        (Func<string?>)(
+            () =>
+            {
+                syncAttempts++;
+                return holdSync ? "sync-account" : null;
+            }
+        )
+    );
+    var dataService = Construct(dataServiceType, repository, syncService);
+    var dependencies = Construct(dependenciesType, null, dataService, null, null, null, null);
+    // No Unity PlayerPrefs here: keep the BazaarDB link hints in memory.
+    var linkHints = new HashSet<string>();
+    dependenciesType
+        .GetProperty("AccountLinkStore")!
+        .SetValue(
+            dependencies,
+            Construct(
+                RequireType(
+                    "BazaarPlusPlus.Game.HistoryPanel.AccountLink.BazaarDbAccountLinkStore"
+                ),
+                (Func<string, bool>)linkHints.Contains,
+                (Action<string>)(key => linkHints.Add(key))
+            )
+        );
+    var state = Activator.CreateInstance(stateType)!;
+    stateType
+        .GetProperty("SectionMode")!
+        .SetValue(
+            state,
+            Enum.Parse(RequireType("BazaarPlusPlus.Game.HistoryPanel.HistorySectionMode"), section)
+        );
+    using var coordinator = (IDisposable)
+        Activator.CreateInstance(
+            coordinatorType,
+            state,
+            dependencies,
+            (Action)(() => { }),
+            (Action)(() => { }),
+            (Action<bool>)(_ => { })
+        )!;
+
+    var bridge = RequireType("BazaarPlusPlus.GameInterop.BppClientCacheBridge");
+    var cacheType = bridge.GetField(
+        "_clientCacheType",
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+    var resolved = bridge.GetField(
+        "_clientCacheTypeResolved",
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+    var previousType = cacheType.GetValue(null);
+    var previousResolved = resolved.GetValue(null);
+    FakeClientCache.SetAccountId(null);
+    cacheType.SetValue(null, typeof(FakeClientCache));
+    resolved.SetValue(null, true);
+    try
+    {
+        body(state, coordinator, () => syncAttempts);
+    }
+    finally
+    {
+        DisposeAndDrainReads(coordinator);
+        api.Dispose();
+        cacheType.SetValue(null, previousType);
+        resolved.SetValue(null, previousResolved);
+        SqliteConnection.ClearAllPools();
+        File.Delete(databasePath);
+    }
+}
+
+// Closing a panel discards publication, but a Task.Run database read may still own its SQLite
+// handle. Teardown must pump the UI context until those reads return before deleting the file.
+// Reflection is confined to fixture cleanup; the scenarios exercise the coordinator's API.
+void DisposeAndDrainReads(IDisposable coordinator)
+{
+    coordinator.Dispose();
+    var reads = coordinatorType
+        .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+        .Where(field =>
+            field.FieldType.IsGenericType
+            && field.FieldType.GetGenericTypeDefinition().FullName
+                == "BazaarPlusPlus.Game.HistoryPanel.LatestHistoryRead`1"
+        )
+        .Select(field => field.GetValue(coordinator)!)
+        .ToArray();
+    uiContext.Until(() =>
+        reads.All(read =>
+            !(bool)
+                read.GetType()
+                    .GetField("_running", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .GetValue(read)!
+        )
+    );
+}
+
+object CreateRun(string runId, string hero)
+{
+    return Activator.CreateInstance(
+            runRecordType,
+            runId,
+            hero,
+            "Ranked",
+            DateTimeOffset.Parse("2026-06-19T00:00:00Z"),
+            DateTimeOffset.Parse("2026-06-19T00:10:00Z"),
+            DateTimeOffset.Parse("2026-06-19T00:10:00Z"),
+            10,
+            1,
+            40,
+            0,
+            5,
+            1,
+            10,
+            "Bronze",
+            100,
+            null,
+            1,
+            0,
+            "finished"
+        ) ?? throw new InvalidOperationException("HistoryRunRecord should construct.");
+}
+
+void TestGhostListTextMarksOnlyTheFinalBattle()
+{
+    var formatterType = RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelFormatter");
+    var final = (string)
+        InvokeStatic(
+            formatterType,
+            "GhostListText",
+            CreateBattle("final", 12, "Win", isFinalBattle: true)
+        )!;
+    var ongoing = (string)
+        InvokeStatic(formatterType, "GhostListText", CreateBattle("ongoing", 12, "Win"))!;
+    Assert(
+        final.Split('\n')[1] == "D12 · Final",
+        $"A run-ending Ghost must mark its day line; got {final}."
+    );
+    Assert(
+        ongoing.Split('\n')[1] == "D12",
+        $"An ordinary Ghost must keep the bare day line; got {ongoing}."
+    );
+}
+
+void TestRunRatingShowsItsChangeOnlyWhenKnown()
+{
+    var formatterType = RequireType("BazaarPlusPlus.Game.HistoryPanel.HistoryPanelFormatter");
+    string Rating(int rating, int? delta) =>
+        (string)InvokeStatic(formatterType, "RatingWithDelta", rating, delta)!;
+    Assert(Rating(1520, null) == "1520", "An unknown change must show the rating alone.");
+    Assert(
+        Rating(1520, 16) == "1520 <color=#9ECC8A>+16</color>",
+        $"A gain must read as +N; got {Rating(1520, 16)}."
+    );
+    Assert(
+        Rating(1520, -12) == "1520 <color=#E5664F>-12</color>",
+        $"A loss must read as -N; got {Rating(1520, -12)}."
+    );
+    Assert(Rating(1520, 0) == "1520 ±0", "A known zero change must read as ±0, not vanish.");
+}
+
+object CreateBattle(string battleId, int? day, string result, bool isFinalBattle = false)
+{
+    var counts =
+        Activator.CreateInstance(snapshotCountsType, 0, 0, 0, 0)
+        ?? throw new InvalidOperationException("HistoryBattleSnapshotCounts should construct.");
+
+    return Activator.CreateInstance(
+            battleRecordType,
+            battleId,
+            "run-1",
+            DateTimeOffset.Parse("2026-06-19T00:00:00Z"),
+            day,
+            1,
+            null,
+            "Vanessa",
+            null,
+            null,
+            null,
+            null,
+            null,
+            "Opponent",
+            "Mak",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "PVPCombat",
+            result,
+            null,
+            null,
+            counts,
+            isFinalBattle,
+            Enum.Parse(battleSourceType, "Ghost"),
+            Enum.Parse(
+                RequireType("BazaarPlusPlus.Game.HistoryPanel.Data.ReplayAvailability"),
+                "Unavailable"
+            )
+        ) ?? throw new InvalidOperationException("HistoryBattleRecord should construct.");
+}
+
+IList CreateRunList(params object[] runs)
+{
+    var listType = typeof(List<>).MakeGenericType(runRecordType);
+    var list = (IList)(Activator.CreateInstance(listType) ?? throw new InvalidOperationException());
+    foreach (var run in runs)
+        list.Add(run);
+    return list;
+}
+
+void SetPage(object state, string propertyName, params object[] records)
+{
+    var property = stateType.GetProperty(propertyName)!;
+    var pageType = property.PropertyType;
+    var counted = pageType.GetGenericTypeDefinition().Name == "HistoryCountedPage`1";
+    const BindingFlags factory = BindingFlags.NonPublic | BindingFlags.Static;
+    if (records.Length == 0)
+    {
+        property.SetValue(
+            state,
+            counted
+                ? pageType.GetMethod("Empty", factory)!.Invoke(null, [0L])
+                : pageType.GetProperty("Empty", factory)!.GetValue(null)
+        );
+        return;
+    }
+    var rows = Array.CreateInstance(pageType.GetGenericArguments()[0], records.Length);
+    for (var i = 0; i < records.Length; i++)
+        rows.SetValue(records[i], i);
+    var anchor = Construct(cursorType, 1767225600000L, "anchor");
+    property.SetValue(
+        state,
+        counted
+            ? Construct(pageType, rows, anchor, anchor, 1L, (long)records.Length)
+            : Construct(pageType, rows, anchor, anchor, false, false)
+    );
+}
+
+IList GetList(object instance, string propertyName) =>
+    (IList)(
+        instance.GetType().GetProperty(propertyName)?.GetValue(instance)
+        ?? throw new InvalidOperationException($"{propertyName} should be a list.")
+    );
+
+object? Invoke(Type type, object instance, string methodName, params object?[] args)
+{
+    var method =
+        type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .SingleOrDefault(method =>
+                method.Name == methodName && method.GetParameters().Length == args.Length
+            )
+        ?? throw new MissingMethodException(type.FullName, methodName);
+    return method.Invoke(instance, args);
+}
+
+object? InvokeStatic(Type type, string methodName, params object?[] args)
+{
+    var method =
+        type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            .SingleOrDefault(method =>
+                method.Name == methodName && method.GetParameters().Length == args.Length
+            )
+        ?? throw new MissingMethodException(type.FullName, methodName);
+    return method.Invoke(null, args);
+}
+
+string? GetString(object? instance, string propertyName) =>
+    (string?)(
+        instance?.GetType().GetProperty(propertyName)?.GetValue(instance)
+        ?? throw new InvalidOperationException($"{propertyName} should exist.")
+    );
+
+string? GetNullableString(object instance, string propertyName)
+{
+    var property =
+        instance.GetType().GetProperty(propertyName)
+        ?? throw new InvalidOperationException($"{propertyName} should exist.");
+    return (string?)property.GetValue(instance);
+}
+
+Type RequireType(string fullName) =>
+    modAssembly.GetType(fullName)
+    ?? throw new InvalidOperationException($"{fullName} should exist.");
+
+object Construct(Type type, params object?[] args)
+{
+    var constructor =
+        type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .SingleOrDefault(ctor => ctor.GetParameters().Length == args.Length)
+        ?? throw new MissingMethodException(type.FullName, ".ctor");
+    return constructor.Invoke(args);
+}
+
+void Assert(bool condition, string message)
+{
+    if (!condition)
+        throw new InvalidOperationException(message);
+}
+
+// Stands in for TheBazaar.ClientCache: BppClientCacheBridge reads Profile.Value.AccountId.
+internal static class FakeClientCache
+{
+    public static FakeObservable Profile { get; } = new();
+
+    public static void SetAccountId(string? accountId) =>
+        Profile.Value = accountId == null ? null : new FakeProfile(accountId);
+}
+
+internal sealed class FakeObservable
+{
+    public bool HasData => Value != null;
+
+    public FakeProfile? Value { get; set; }
+}
+
+internal sealed record FakeProfile(string AccountId);
+
+internal sealed class RefusingHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken
+    ) => throw new InvalidOperationException("History account tests must not reach the network.");
+}
+
+internal sealed class HoldingHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken
+    )
+    {
+        var pending = new TaskCompletionSource<HttpResponseMessage>();
+        // Like a real transport, a cancelled request unwinds after the session boundary returns: the
+        // cancellation completes only when the test next pumps the UI context, so History starts the
+        // next sync while the cancelled one still holds the Ghost sync service.
+        cancellationToken.Register(() =>
+        {
+            if (SynchronizationContext.Current is { } context)
+                context.Post(_ => pending.TrySetCanceled(cancellationToken), null);
+            else
+                pending.TrySetCanceled(cancellationToken);
+        });
+        return pending.Task;
+    }
+}

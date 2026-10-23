@@ -1,0 +1,31 @@
+#nullable enable
+using HarmonyLib;
+using TheBazaar;
+
+namespace BazaarPlusPlus.Patches.Combat;
+
+[HarmonyPatch(typeof(StartRunAppState), nameof(StartRunAppState.FinalizeRunInitialization))]
+internal static class CombatReplayFinalizeRunInitializationPatch
+{
+#if BPP_ANDROID
+    [HarmonyPrefix]
+    private static bool Prefix(ref Il2CppSystem.Threading.Tasks.Task __result)
+    {
+        if (!CombatReplayPatchGuard.IsReplayStartOrPlaybackActive)
+            return true;
+
+        __result = Il2CppSystem.Threading.Tasks.Task.CompletedTask;
+        return false;
+    }
+#else
+    [HarmonyPrefix]
+    private static bool Prefix(ref Task __result)
+    {
+        if (!CombatReplayPatchGuard.IsReplayStartOrPlaybackActive)
+            return true;
+
+        __result = Task.CompletedTask;
+        return false;
+    }
+#endif
+}

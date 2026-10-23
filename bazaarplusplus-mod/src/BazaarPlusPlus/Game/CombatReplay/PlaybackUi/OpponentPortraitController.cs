@@ -1,0 +1,298 @@
+#nullable enable
+using System.Reflection;
+using BazaarGameShared.Domain.Core.Types;
+using BazaarGameShared.Infra.Messages;
+using BazaarGameShared.Infra.Messages.GameSimEvents;
+using BazaarGameShared.TempoNet.Enums;
+using BazaarGameShared.TempoNet.Models;
+using BazaarPlusPlus.Game.PvpBattles;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using TheBazaar;
+using TheBazaar.AppFramework;
+using TheBazaar.Assets.Scripts.ScriptableObjectsScripts;
+using UnityEngine;
+
+namespace BazaarPlusPlus.Game.CombatReplay.PlaybackUi;
+
+internal sealed class OpponentPortraitController
+{
+    private readonly Action<UnityEngine.Object> _destroyHandle;
+    private EncounterController? _portrait;
+    private EHero? _originalSelectedHero;
+    private bool _selectedHeroOverridden;
+
+    public OpponentPortraitController(Action<UnityEngine.Object> destroyHandle)
+    {
+        _destroyHandle = destroyHandle ?? throw new ArgumentNullException(nameof(destroyHandle));
+    }
+
+    public async Task EnsureTemporaryOpponentPortraitAsync(
+        PvpBattleManifest manifest,
+        IReplayPlaybackOutcomeSink outcome
+    )
+    {
+        if (_portrait != null)
+        {
+            _portrait.gameObject.SetActive(true);
+            _portrait.ShowCard(show: true);
+            PlaybackUiState.ActiveOpponentPortrait = _portrait;
+            return;
+        }
+
+        var boardManager = Singleton<BoardManager>.Instance;
+        if (boardManager == null)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentPortraitUnavailable);
+            return;
+        }
+
+        var hero = Data.SimPvpOpponent?.Hero;
+        if (!hero.HasValue || hero.Value == EHero.Common)
+        {
+            if (
+                !CombatReplayHeroIdentity.TryParse(
+                    manifest.Participants.OpponentHero,
+                    out var parsedHero
+                )
+            )
+            {
+                outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentPortraitUnavailable);
+                return;
+            }
+
+            hero = parsedHero;
+        }
+
+        var collectionManager = Services.Get<CollectionManager>();
+        if (collectionManager == null)
+            throw new InvalidOperationException("CollectionManager is unavailable.");
+
+        var loadout =
+            Data.SimPvpOpponent?.PlayerLoadout
+            ?? new BazaarCollectionLoadout
+            {
+                accountId = manifest.Participants.OpponentAccountId ?? string.Empty,
+                heroSkinIds = Array.Empty<string>(),
+                cardSkinIds = Array.Empty<string>(),
+            };
+
+#pragma warning disable CS0618
+        var skinData =
+            await collectionManager.GetEquippedHeroSkin(hero.Value, loadout)
+            ?? await collectionManager.GetEquippedHeroSkin(hero.Value);
+#pragma warning restore CS0618
+        if (skinData == null)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentPortraitUnavailable);
+            return;
+        }
+
+        var anchor = boardManager.GetAnchor(AnchorSide.Opponent, AnchorType.Portrait);
+        var portraitController = await LoadHeroPortraitAsync(
+            skinData,
+            ResolvePortraitTier(manifest),
+            anchor
+        );
+        if (portraitController == null)
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentPortraitUnavailable);
+            return;
+        }
+
+        if (Data.CurrentEncounterController != null)
+            Data.CurrentEncounterController.ShowCard(show: false);
+
+        portraitController.gameObject.name = "ReplayOpponentPortrait";
+        portraitController.gameObject.SetActive(true);
+        portraitController.ShowCard(show: true);
+        _portrait = portraitController;
+        PlaybackUiState.ActiveOpponentPortrait = _portrait;
+    }
+
+    public void Cleanup(string? battleId = null)
+    {
+        if (_portrait != null)
+        {
+            try
+            {
+                _destroyHandle(_portrait.gameObject);
+            }
+            catch (Exception ex)
+            {
+                BppLog.DebugEvent(
+                    new BppLogEvent(
+                        BppLogFeatureScope.CombatReplay,
+                        "combat_replay.playback.cleanup_observed"
+                    ),
+                    ex,
+                    () =>
+                        [
+                            ("stage", "opponent_portrait"),
+                            ("removed_count", 0),
+                            ("battle_id", battleId, BppLogCorrelationPolicy.Short),
+                        ]
+                );
+            }
+
+            _portrait = null;
+            PlaybackUiState.ActiveOpponentPortrait = null;
+        }
+
+        if (Data.CurrentEncounterController != null)
+        {
+            Data.CurrentEncounterController.gameObject.SetActive(true);
+            Data.CurrentEncounterController.ShowCard(show: true);
+        }
+    }
+
+    public void ApplySelectedHeroOverride(PvpBattleManifest manifest)
+    {
+        if (manifest?.Participants == null)
+            return;
+
+        if (
+            !CombatReplayHeroIdentity.TryParse(manifest.Participants.PlayerHero, out var replayHero)
+        )
+            return;
+
+        _originalSelectedHero = Data.SelectedHero;
+        if (_originalSelectedHero.Value == replayHero)
+        {
+            _selectedHeroOverridden = false;
+            _originalSelectedHero = null;
+            return;
+        }
+
+        SetSelectedHero(replayHero);
+        _selectedHeroOverridden = true;
+    }
+
+    public void RestoreSelectedHeroOverride()
+    {
+        if (!_selectedHeroOverridden || !_originalSelectedHero.HasValue)
+            return;
+
+        SetSelectedHero(_originalSelectedHero.Value);
+        _selectedHeroOverridden = false;
+        _originalSelectedHero = null;
+    }
+
+    public static void EnsureOpponentIdentity(
+        PvpBattleManifest manifest,
+        NetMessageGameSim spawnMessage,
+        IReplayPlaybackOutcomeSink outcome
+    )
+    {
+        if (manifest?.Participants == null)
+            return;
+
+        if (spawnMessage?.Data?.CurrentState?.PvpOpponent != null)
+            return;
+
+        if (
+            !CombatReplayHeroIdentity.TryParse(
+                manifest.Participants.OpponentHero,
+                out var opponentHero
+            )
+        )
+        {
+            outcome.ReportDegradation(ReplayPlaybackReasonCode.OpponentIdentityUnavailable);
+            return;
+        }
+
+        var opponentLoadout = new BazaarCollectionLoadout
+        {
+            accountId = manifest.Participants.OpponentAccountId ?? string.Empty,
+            heroSkinIds = Array.Empty<string>(),
+            cardSkinIds = Array.Empty<string>(),
+        };
+
+        Data.SimPvpOpponent = new SimPvpOpponent(
+            manifest.Participants.OpponentName,
+            null,
+            null,
+            TryParseRank(manifest.Participants.OpponentRank).ToNativeNullable(),
+            manifest.Participants.OpponentRating ?? 0,
+            ((int?)null).ToNativeNullable(),
+            ((uint?)null).ToNativeNullable(),
+            ((int?)null).ToNativeNullable(),
+            manifest.Participants.OpponentLevel.ToNativeNullable(),
+            opponentHero.ToNativeNullable(),
+            opponentLoadout,
+            null
+        );
+    }
+
+    private static async Task<EncounterController?> LoadHeroPortraitAsync(
+        SkinAssetDataSO skinData,
+        ETier tier,
+        Transform parent
+    )
+    {
+#if BPP_ANDROID
+        return await BoardBuilder.LoadHeroPortraitAsync(skinData, tier, parent, false)
+            .AsManagedTask();
+#else
+        var boardBuilderType = typeof(BoardBuilder);
+        var loadMethod = boardBuilderType.GetMethod(
+            "LoadHeroPortraitAsync",
+            BindingFlags.Static | BindingFlags.NonPublic
+        );
+        if (loadMethod == null)
+            throw new MissingMethodException(boardBuilderType.FullName, "LoadHeroPortraitAsync");
+
+        var taskObject = loadMethod.Invoke(null, new object?[] { skinData, tier, parent, false });
+        if (taskObject is Task<EncounterController> typedTask)
+            return await typedTask;
+
+        if (taskObject is not Task task)
+            return taskObject as EncounterController;
+
+        await task;
+        return task.GetType()
+                .GetProperty("Result", BindingFlags.Instance | BindingFlags.Public)
+                ?.GetValue(task) as EncounterController;
+#endif
+    }
+
+    private static ETier ResolvePortraitTier(PvpBattleManifest manifest)
+    {
+        if (
+            !string.IsNullOrWhiteSpace(manifest?.Participants?.OpponentRank)
+            && Enum.TryParse(manifest.Participants.OpponentRank.Trim(), true, out ETier tier)
+        )
+            return tier;
+
+        return ETier.Bronze;
+    }
+
+    private static void SetSelectedHero(EHero hero)
+    {
+#if BPP_ANDROID
+        ClientCache.RunConfig.SetSelectedHero(hero);
+#else
+        var clientCacheType = typeof(Data).Assembly.GetType("TheBazaar.ClientCache", false);
+        var runConfigField = clientCacheType?.GetField(
+            "RunConfig",
+            BindingFlags.Static | BindingFlags.Public
+        );
+        var runConfig = runConfigField?.GetValue(null);
+        var setSelectedHeroMethod = runConfig
+            ?.GetType()
+            .GetMethod("SetSelectedHero", BindingFlags.Instance | BindingFlags.Public);
+        if (setSelectedHeroMethod == null)
+            throw new MissingMethodException("TheBazaar.RunConfigurationCache", "SetSelectedHero");
+
+        setSelectedHeroMethod.Invoke(runConfig, new object[] { hero });
+#endif
+    }
+
+    private static ERank? TryParseRank(string? rank)
+    {
+        if (!string.IsNullOrWhiteSpace(rank) && Enum.TryParse(rank.Trim(), true, out ERank parsed))
+            return parsed;
+
+        return null;
+    }
+}

@@ -1,0 +1,8 @@
+# Permanent RS0030 exemptions. SourceTextBanTests holds the set; the debt list is empty
+# and stays empty.
+
+[Shared/TestFiles/**.cs]
+dotnet_diagnostic.RS0030.severity = none
+
+[CombatImpact.Corpus/**.cs]
+dotnet_diagnostic.RS0030.severity = none

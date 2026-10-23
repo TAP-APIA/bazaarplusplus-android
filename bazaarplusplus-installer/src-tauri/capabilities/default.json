@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-start-dragging",
+    "opener:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "steam://*"
+        }
+      ]
+    },
+    "dialog:default"
+  ]
+}

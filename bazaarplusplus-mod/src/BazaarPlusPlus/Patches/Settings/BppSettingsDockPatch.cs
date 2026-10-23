@@ -1,0 +1,104 @@
+#pragma warning disable CS0436
+#nullable enable
+using BazaarPlusPlus.Game.CollectionPanel;
+using BazaarPlusPlus.Game.Settings;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using HarmonyLib;
+using UnityEngine.UI;
+
+namespace BazaarPlusPlus.Patches.Settings;
+
+[HarmonyPatch(typeof(SettingDialogsView), "Awake")]
+internal static class CollectionPanelDockButtonAwakePatch
+{
+    private static readonly BppFieldAccessor? MainMenuSettingOptionButtonField =
+        BppFieldAccessor.Find(typeof(SettingDialogsView), "MainMenuSettingOptionButton");
+
+    private static readonly BppFieldAccessor? HeroSelectSettingOptionButtonField =
+        BppFieldAccessor.Find(typeof(SettingDialogsView), "HeroSelectSettingOptionButton");
+
+    [HarmonyPostfix]
+    private static void Postfix(SettingDialogsView __instance)
+    {
+        try
+        {
+            AttachButton(
+                MainMenuSettingOptionButtonField?.GetValue<Button>(__instance),
+                "MainMenu",
+                SettingsNativeButtonId.MainMenu
+            );
+            AttachButton(
+                HeroSelectSettingOptionButtonField?.GetValue<Button>(__instance),
+                "HeroSelect",
+                SettingsNativeButtonId.HeroSelect
+            );
+        }
+        catch (Exception ex)
+        {
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.Settings,
+                    "settings.patch.degraded",
+                    storm: ["operation", "reason_code"]
+                ),
+                ex,
+                ("operation", SettingsPatchOperation.DockAwake),
+                ("reason_code", SettingsLogReasonCode.PatchException)
+            );
+        }
+    }
+
+    private static void AttachButton(Button? button, string key, SettingsNativeButtonId buttonId)
+    {
+        if (button == null)
+            return;
+
+        CollectionPanelDockButtonController.Attach(
+            button,
+            BppSettingsDockPlacement.ForButton($"CollectionPanel_{key}", buttonId)
+        );
+    }
+}
+
+[HarmonyPatch(typeof(FightMenuDialog), "Start")]
+internal static class CollectionPanelDockButtonFightMenuPatch
+{
+    private static readonly BppFieldAccessor? SettingButtonField = BppFieldAccessor.Find(
+        typeof(FightMenuDialog),
+        "SettingButton"
+    );
+
+    [HarmonyPostfix]
+    private static void Postfix(FightMenuDialog __instance)
+    {
+        try
+        {
+            var settingButtonCustom = SettingButtonField?.GetValue<ButtonCustom>(__instance);
+            var button = settingButtonCustom?.GetButton();
+            if (button != null)
+            {
+                CollectionPanelDockButtonController.Attach(
+                    button,
+                    BppSettingsDockPlacement.ForButton(
+                        "CollectionPanel_FightMenu",
+                        SettingsNativeButtonId.FightMenu
+                    )
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.Settings,
+                    "settings.patch.degraded",
+                    storm: ["operation", "reason_code"]
+                ),
+                ex,
+                ("operation", SettingsPatchOperation.DockOpen),
+                ("reason_code", SettingsLogReasonCode.PatchException)
+            );
+        }
+    }
+}

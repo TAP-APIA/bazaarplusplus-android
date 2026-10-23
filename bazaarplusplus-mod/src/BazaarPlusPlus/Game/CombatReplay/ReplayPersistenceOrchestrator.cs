@@ -1,0 +1,286 @@
+#nullable enable
+using BazaarPlusPlus.Core.Events;
+using BazaarPlusPlus.Core.Runtime;
+using BazaarPlusPlus.Game.PvpBattles;
+using BazaarPlusPlus.Game.PvpBattles.Persistence;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using BazaarPlusPlus.Storage.Paths;
+
+namespace BazaarPlusPlus.Game.CombatReplay;
+
+internal sealed class ReplayPersistenceOrchestrator : IDisposable
+{
+    private readonly IBppServices _services;
+    private readonly IPvpBattleCatalog _battleCatalog;
+    private readonly CombatReplayPayloadStore _payloadStore;
+    private readonly CombatReplayPersistenceQueue _persistenceQueue;
+    private readonly ReplayPayloadOperationGate _operationGate = new();
+    private readonly ReplayPayloadMaintenanceService _payloadMaintenance;
+    private readonly ReplayMaintenanceFlight _maintenanceFlight = new();
+    private readonly Action<PvpBattleManifest, bool, Exception?>? _resultObserver;
+    private readonly object _drainGate = new();
+    private bool _disposed;
+
+    public ReplayPersistenceOrchestrator(
+        IBppServices services,
+        IPvpBattleCatalog battleCatalog,
+        Action<PvpBattleManifest, bool, Exception?>? resultObserver = null
+    )
+    {
+        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _battleCatalog = battleCatalog ?? throw new ArgumentNullException(nameof(battleCatalog));
+        _resultObserver = resultObserver;
+
+        var combatReplayDirectoryPath = PathConstants.CombatReplays(
+            services.Paths.RequireDataRoot()
+        );
+
+        _payloadStore = new CombatReplayPayloadStore(combatReplayDirectoryPath);
+        _persistenceQueue = new CombatReplayPersistenceQueue(
+            _payloadStore.Save,
+            _battleCatalog.Save,
+            _payloadStore.Delete,
+            _operationGate
+        );
+        _persistenceQueue.SetLateResultsAvailableCallback(DrainLateShutdownResults);
+        _payloadMaintenance = new ReplayPayloadMaintenanceService(
+            _battleCatalog,
+            _payloadStore,
+            _operationGate,
+            _persistenceQueue.SnapshotProtectedBattleIds
+        );
+#if BPP_ANDROID
+        // The IL2CPP type resolver is not safe to enter from a worker thread: the maintenance pass
+        // touches projected game types off the main thread and the runtime aborts inside
+        // Il2CppInterop's Class::FromIl2CppType hook. The Android port keeps replay storage idle
+        // rather than crashing the game.
+        _ = _maintenanceFlight;
+#else
+        _maintenanceFlight.Start(token => Task.Run(() => RunMaintenance(token), token));
+#endif
+    }
+
+    public IPvpBattleCatalog Catalog => _battleCatalog;
+    public CombatReplayPayloadStore PayloadStore => _payloadStore;
+    public bool HasPendingPersistence => _persistenceQueue.HasPendingPersistence;
+
+    internal IDisposable? TryAcquirePlaybackPayloadLease() => _operationGate.TryAcquirePlayback();
+
+    public void Enqueue(PvpReplayPayload payload, PvpBattleManifest manifest)
+    {
+        if (_disposed)
+            return;
+
+        ReplayPersistenceStateTracker.Enqueued(manifest.RunId);
+        try
+        {
+            _persistenceQueue.Enqueue(payload, manifest);
+        }
+        catch
+        {
+            ReplayPersistenceStateTracker.Completed(manifest.RunId);
+            throw;
+        }
+    }
+
+    public void DrainPendingResults()
+    {
+        DrainPendingResults(publishSideEffects: true);
+    }
+
+    private void DrainLateShutdownResults()
+    {
+        DrainPendingResults(publishSideEffects: false);
+    }
+
+    private void DrainPendingResults(bool publishSideEffects)
+    {
+        List<PersistenceResultNotification>? notifications = null;
+        lock (_drainGate)
+        {
+            var processedAny = false;
+            while (_persistenceQueue.TryDequeueResult(out var result))
+            {
+                ReplayPersistenceStateTracker.Completed(result.Manifest.RunId);
+                processedAny = true;
+                if (!result.Succeeded)
+                {
+                    if (publishSideEffects)
+                    {
+                        notifications ??= new List<PersistenceResultNotification>();
+                        notifications.Add(
+                            new PersistenceResultNotification(
+                                result.Manifest,
+                                Succeeded: false,
+                                result.Error
+                            )
+                        );
+                    }
+                    BppLog.ErrorEvent(
+                        new BppLogEvent(
+                            BppLogFeatureScope.CombatReplay,
+                            "combat_replay.persistence.failed"
+                        ),
+                        result.Error!,
+                        ("battle_id", result.Manifest.BattleId, BppLogCorrelationPolicy.Short),
+                        ("run_id", result.Manifest.RunId, BppLogCorrelationPolicy.Short),
+                        (
+                            "reason_code",
+                            result.Error is OperationCanceledException
+                                ? ReplayPersistenceReasonCode.ShutdownAbandoned
+                                : ReplayPersistenceReasonCode.PersistenceFailed
+                        )
+                    );
+                    continue;
+                }
+
+                if (publishSideEffects)
+                {
+                    notifications ??= new List<PersistenceResultNotification>();
+                    notifications.Add(
+                        new PersistenceResultNotification(
+                            result.Manifest,
+                            Succeeded: true,
+                            Error: null
+                        )
+                    );
+                }
+
+                if (publishSideEffects)
+                {
+                    try
+                    {
+                        _services.EventBus.Publish(
+                            new PvpBattleRecorded { Manifest = result.Manifest }
+                        );
+                    }
+                    catch
+                    {
+                        // Persistence already succeeded. A secondary observer must not suppress its
+                        // authoritative result or prevent the remaining queue from draining.
+                    }
+                }
+
+                BppLog.DebugEvent(
+                    new BppLogEvent(
+                        BppLogFeatureScope.CombatReplay,
+                        "combat_replay.persistence.succeeded"
+                    ),
+                    () =>
+                        [
+                            ("battle_id", result.Manifest.BattleId, BppLogCorrelationPolicy.Short),
+                            ("run_id", result.Manifest.RunId, BppLogCorrelationPolicy.Short),
+                            ("reason_code", ReplayPersistenceReasonCode.Persisted),
+                        ]
+                );
+            }
+
+            if (publishSideEffects && processedAny && !_persistenceQueue.HasPendingPersistence)
+            {
+                try
+                {
+                    _services.EventBus.Publish(new CombatReplayPersistenceDrained());
+                }
+                catch
+                {
+                    // The queue is drained regardless of an observer failure.
+                }
+            }
+        }
+
+        if (notifications == null)
+            return;
+        for (var index = 0; index < notifications.Count; index++)
+        {
+            var notification = notifications[index];
+            NotifyResultObserver(notification.Manifest, notification.Succeeded, notification.Error);
+        }
+    }
+
+    private void NotifyResultObserver(PvpBattleManifest manifest, bool succeeded, Exception? error)
+    {
+        try
+        {
+            _resultObserver?.Invoke(manifest, succeeded, error);
+        }
+        catch
+        {
+            // Persistence remains authoritative even if a UI-facing observer fails.
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+
+        _maintenanceFlight.Dispose();
+        _persistenceQueue.Dispose();
+        DrainPendingResults(publishSideEffects: true);
+        _operationGate.Dispose();
+    }
+
+    private void RunMaintenance(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = _payloadMaintenance.Run(DateTimeOffset.UtcNow, cancellationToken);
+            if (result.FailedDeleteCount == 0)
+            {
+                var completed = MaintenanceFields(ReplayMaintenanceReasonCode.Completed, result);
+                BppLog.DebugEvent(
+                    new BppLogEvent(
+                        BppLogFeatureScope.CombatReplay,
+                        "combat_replay.maintenance.completed"
+                    ),
+                    () => completed
+                );
+                return;
+            }
+
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.CombatReplay,
+                    "combat_replay.maintenance.degraded",
+                    storm: ["reason_code"]
+                ),
+                MaintenanceFields(ReplayMaintenanceReasonCode.DeleteFailed, result)
+            );
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.CombatReplay,
+                    "combat_replay.maintenance.degraded",
+                    storm: ["reason_code"]
+                ),
+                ex,
+                MaintenanceFields(ReplayMaintenanceReasonCode.ScanFailed, default)
+            );
+        }
+    }
+
+    private static BppLogField[] MaintenanceFields(
+        ReplayMaintenanceReasonCode reasonCode,
+        ReplayPayloadMaintenanceResult result
+    ) =>
+        [
+            ("reason_code", reasonCode),
+            ("evaluated_count", result.EvaluatedPayloadCount),
+            ("scheduled_count", result.ScheduledDeleteCount),
+            ("deleted_count", result.DeletedPayloadCount),
+            ("missing_count", result.MissingPayloadCount),
+            ("orphan_count", result.OrphanDeleteCount),
+            ("failed_count", result.FailedDeleteCount),
+        ];
+
+    private readonly record struct PersistenceResultNotification(
+        PvpBattleManifest Manifest,
+        bool Succeeded,
+        Exception? Error
+    );
+}

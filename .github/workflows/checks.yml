@@ -1,0 +1,404 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Projects to verify
+        type: choice
+        options: [full, installer, mod]
+        default: full
+      platform:
+        description: Native platforms to verify
+        type: choice
+        options: [all, macos, windows]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.scope }}-${{ inputs.platform }}
+  # Let master finish the post-job cache save even when another merge arrives.
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/master') }}
+
+# Explicit platform jobs let the summary verify each selected native result.
+jobs:
+  classify:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.scope.outputs.release }}
+      site: ${{ steps.scope.outputs.site }}
+      server: ${{ steps.scope.outputs.server }}
+      analyzer: ${{ steps.scope.outputs.analyzer }}
+      installer-frontend: ${{ steps.scope.outputs.installer-frontend }}
+      installer-macos: ${{ steps.scope.outputs.installer-macos }}
+      installer-windows: ${{ steps.scope.outputs.installer-windows }}
+      mod-macos: ${{ steps.scope.outputs.mod-macos }}
+      mod-windows: ${{ steps.scope.outputs.mod-windows }}
+      macos-icon: ${{ steps.scope.outputs.macos-icon }}
+      plan: ${{ steps.scope.outputs.plan }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Keep the scripts available even if fetching history fails. The
+      # classifier falls back to full coverage if a diff cannot be obtained.
+      - id: history
+        name: Fetch complete history for change detection
+        continue-on-error: true
+        run: git fetch --no-tags --unshallow origin
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - id: scope
+        run: node .github/scripts/checks-scope.mjs
+        env:
+          HISTORY_FETCH_OUTCOME: ${{ steps.history.outcome }}
+
+  macos-icon:
+    name: macOS Icon Composer asset
+    needs: classify
+    if: needs.classify.outputs.macos-icon == 'true'
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          xcodebuild -version
+          node bazaarplusplus-installer/scripts/release/compile-macos-icon.mjs
+
+  release:
+    name: Release tooling
+    needs: classify
+    if: needs.classify.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: bazaarplusplus-mod/global.json
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: 1.58.0
+      - run: npm install --global "$(node --print "require('./package.json').packageManager")"
+      - run: npm ci
+      - run: just commands-check release::check release::test
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - run: node --test .github/scripts/*.test.mjs
+
+  site:
+    name: site (full check and test)
+    needs: classify
+    if: needs.classify.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT: site
+      WRANGLER_SEND_METRICS: 'false'
+    steps: &node-steps
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: bazaarplusplus-${{ env.PROJECT }}/package-lock.json
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: 1.58.0
+      - run: npm install --global "$(node --print "require('./package.json').packageManager")"
+      - run: npm ci
+        working-directory: bazaarplusplus-${{ env.PROJECT }}
+      - run: just '${{ env.PROJECT }}::check'
+      - if: env.PROJECT == 'site'
+        run: |
+          just site::test
+          npm --prefix bazaarplusplus-site run deploy:dry-run
+          npm --prefix bazaarplusplus-site run deploy:preview:dry-run
+      - if: env.PROJECT == 'site'
+        working-directory: bazaarplusplus-site
+        run: npx playwright install --with-deps chromium
+      - if: env.PROJECT == 'site'
+        run: just site::e2e golden
+      - if: failure() && env.PROJECT == 'site'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-e2e-results
+          path: |
+            bazaarplusplus-site/test-results/
+            bazaarplusplus-site/e2e/__snapshots__/
+          if-no-files-found: ignore
+      - if: env.PROJECT == 'server'
+        run: just server::test
+
+  server:
+    name: server (full check and test)
+    needs: classify
+    if: needs.classify.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT: server
+      WRANGLER_SEND_METRICS: 'false'
+    steps: *node-steps
+
+  installer-frontend:
+    name: Installer (frontend)
+    needs: classify
+    if: needs.classify.outputs.installer-frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: bazaarplusplus-installer/package-lock.json
+      - run: npm install --global "$(node --print "require('./package.json').packageManager")"
+        working-directory: bazaarplusplus-installer
+      - name: Install Installer npm dependencies
+        run: npm ci
+        working-directory: bazaarplusplus-installer
+      # Consume committed bindings; native inputs also select real generation.
+      - name: Verify Installer
+        run: npm run verify -- --source-only --subset frontend
+        working-directory: bazaarplusplus-installer
+
+  installer-macos:
+    name: Installer (macos-14)
+    needs: classify
+    if: needs.classify.outputs.installer-macos == 'true'
+    runs-on: macos-14
+    timeout-minutes: 60
+    env: &installer-env
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    defaults:
+      run:
+        shell: bash
+    steps: &installer-steps
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: bazaarplusplus-installer/package-lock.json
+      - name: Install the repository Rust toolchain and components
+        working-directory: bazaarplusplus-installer
+        run: |
+          rustc --version
+          rustup show active-toolchain
+      - name: Restore Installer Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: bazaarplusplus-installer/src-tauri
+          # Include these in the prefix so even fallback restores cannot cross
+          # toolchain, lockfile or build-configuration changes.
+          # Preserve the former matrix job ID suffix without coupling the
+          # cache namespace to the new job IDs. shared-key replaces key + job.
+          shared-key: installer-${{ runner.os == 'macOS' && 'macos-14' || 'windows-latest' }}-${{ runner.arch }}-${{ hashFiles('bazaarplusplus-installer/rust-toolchain.toml', 'bazaarplusplus-installer/src-tauri/Cargo.lock', 'bazaarplusplus-installer/src-tauri/.cargo/config.toml') }}-installer
+          cache-bin: false
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+      - run: npm install --global "$(node --print "require('./package.json').packageManager")"
+        working-directory: bazaarplusplus-installer
+      - name: Install Installer npm dependencies
+        run: npm ci
+        working-directory: bazaarplusplus-installer
+      # Real binding generation precedes the diff check. Windows also repeats
+      # script tests; both platforms use an empty source resource bundle.
+      - name: Verify Installer
+        run: npm run verify -- --source-only --subset native
+        working-directory: bazaarplusplus-installer
+
+  installer-windows:
+    name: Installer (windows-latest)
+    needs: classify
+    if: needs.classify.outputs.installer-windows == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env: *installer-env
+    defaults:
+      run:
+        shell: bash
+    steps: *installer-steps
+
+  installer-timings:
+    name: Installer timing report
+    needs: [classify, installer-frontend, installer-macos, installer-windows]
+    if: always() && needs.classify.outputs.installer-frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # Post-job cache saves have finished; the Jobs API includes their timing.
+      - run: node .github/scripts/installer-timings.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  analyzer:
+    name: Analyzer
+    needs: classify
+    if: needs.classify.outputs.analyzer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          working-directory: bazaarplusplus-analyzer
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: 1.58.0
+      - run: uv sync --locked
+        working-directory: bazaarplusplus-analyzer
+      - run: just analyzer::check analyzer::test
+
+  mod-macos:
+    name: Mod (macos-14)
+    needs: classify
+    # Fork PRs have no private snapshots; summary records the explicit exception.
+    if: needs.classify.outputs.mod-macos == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: macos-14
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      BPP_CI_PLATFORM: macos
+      CLOUDFLARE_API_TOKEN: ${{ secrets.BPP_GAME_LIBS_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps: &mod-steps
+      - name: Require private store credentials
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo '::error::BPP_GAME_LIBS_TOKEN or CLOUDFLARE_ACCOUNT_ID is missing; selected Mod checks cannot run.'
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: bazaarplusplus-mod/global.json
+          cache: true
+          cache-dependency-path: bazaarplusplus-mod/**/packages.lock.json
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: 1.58.0
+      # A null online entry fails here, naming the snapshot to capture.
+      - name: Fetch the online snapshot
+        run: just mod::fetch "$BPP_CI_PLATFORM" online
+      - run: just mod::check
+      - run: just mod::test
+      - name: Preserve Combat Impact corpus evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: combat-impact-corpus-${{ env.BPP_CI_PLATFORM }}
+          path: bazaarplusplus-mod/artifacts/combat-impact-corpus/*.json
+          if-no-files-found: error
+      # Compatibility builds against the other two channels; a null entry fails.
+      - run: just mod::matrix staging ptr
+
+  mod-windows:
+    name: Mod (windows-latest)
+    needs: classify
+    if: needs.classify.outputs.mod-windows == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      BPP_CI_PLATFORM: windows
+      CLOUDFLARE_API_TOKEN: ${{ secrets.BPP_GAME_LIBS_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps: *mod-steps
+
+  summary:
+    name: ${{ github.event_name == 'workflow_dispatch' && format('Manual checks ({0}/{1})', inputs.scope, inputs.platform) || 'Checks summary' }}
+    # A dispatch check on the same SHA must never satisfy PR protection.
+    if: always()
+    needs:
+      [
+        classify,
+        release,
+        site,
+        server,
+        analyzer,
+        installer-frontend,
+        installer-macos,
+        installer-windows,
+        mod-macos,
+        mod-windows,
+        macos-icon,
+        installer-timings
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: node .github/scripts/checks-summary.mjs
+        env:
+          CHECK_NEEDS: ${{ toJSON(needs) }}
+          MOD_CREDENTIALS: ${{ secrets.BPP_GAME_LIBS_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' }}
+
+  bot-mod-boundary:
+    name: Bot Mod dependency boundary
+    if: github.event_name == 'pull_request' && (github.event.pull_request.user.login == 'dependabot[bot]' || github.event.pull_request.user.login == 'renovate[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject Mod runtime or transitive dependency changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git show "$BASE_SHA:.github/scripts/check_mod_dependency_update.py" > "$RUNNER_TEMP/check_mod_dependency_update.py"
+          python3 "$RUNNER_TEMP/check_mod_dependency_update.py" "$BASE_SHA" "$HEAD_SHA"

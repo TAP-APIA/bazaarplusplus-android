@@ -1,0 +1,162 @@
+#nullable enable
+using System.IO.Compression;
+using BazaarPlusPlus.Game.HistoryPanel;
+using BazaarPlusPlus.Game.HistoryPanel.Ghost;
+using BazaarPlusPlus.Game.HistoryPanel.Storage;
+using BazaarPlusPlus.Game.PvpBattles;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Storage.RunLog;
+using Microsoft.Data.Sqlite;
+
+internal static class HistoryGhostRecoveryTests
+{
+    internal static void Run()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"bpp-ghost-recovery-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            CheckRecovery(root);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static void CheckRecovery(string root)
+    {
+        var path = Path.Combine(root, "recovery.sqlite3");
+        using var db = new SqliteConnection($"Data Source={path}");
+        db.Open();
+        RunLogSchema.EnsureInitialized(db);
+        using var command = db.CreateCommand();
+        command.CommandText = """
+            WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<85)
+            INSERT INTO battles (battle_id,source,remote_battle_id,uploader_account_id,local_player_account_id,bundle_id,recorded_at_ms,ghost_replay_state,deleted_at_ms,combat_kind)
+            SELECT printf('recover%03d',x),'GHOST',printf('remote%03d',x),'uploader','account-a','bundle',1767225600000,'local_ready',1769904000000,'PVPCombat' FROM n;
+            INSERT INTO battles (battle_id,source,remote_battle_id,uploader_account_id,local_player_account_id,bundle_id,recorded_at_ms,combat_kind)
+            VALUES ('stale','GHOST','remote-stale','uploader','account-a','bundle',1767225600000,'PVPCombat');
+            """;
+        command.ExecuteNonQuery();
+        var repository = new HistoryPanelRepository(path);
+        var replay = Path.Combine(root, "Replays");
+        var payloadPath = GhostBattlePayloadStore.ResolveDirectory(replay);
+        var store = new GhostBattlePayloadStore(payloadPath);
+        store.Save(Payload("recover000", "account-a"));
+        store.Save(Payload("recover085", "account-a"));
+        store.Save(Payload("recover001", "wrong-account"));
+        File.WriteAllText(Path.Combine(payloadPath, "recover084.ghost.mpack.gz"), "invalid");
+        var oversize = Path.Combine(payloadPath, "recover083.ghost.mpack.gz");
+        using (var file = File.Create(oversize))
+            file.SetLength(16 * 1024 * 1024 + 1);
+        var result = store.LoadDetailed("recover083");
+        Check(
+            result.Status == FileBackedPayloadLoadStatus.Unreadable && File.Exists(oversize),
+            "Compressed size rejection must retain the original file."
+        );
+        var data = new HistoryPanelDataService(repository, null, () => replay);
+        // Expiry is not account-scoped; restoring is. The panel reloads on either count.
+        Check(
+            data.MaintainGhosts("account-b", CancellationToken.None)
+                is { Expired: > 0, Restored: 0 },
+            "Maintenance must report the stale rows it hides and isolate restore by account."
+        );
+        Check(
+            data.MaintainGhosts("account-a", CancellationToken.None) == (0, 2),
+            "Maintenance must advance past missing/corrupt files across all 40-row pages and restore only matching payloads."
+        );
+        Check(
+            data.MaintainGhosts("account-a", CancellationToken.None) == (0, 0),
+            "Expiry and recovery must be idempotent."
+        );
+        Check(
+            repository.ListGhostBattles("account-a", GhostBattleFilter.All, false, new()).Rows.Count
+                == 2,
+            "Recovered downloads must remain visible despite age."
+        );
+        Check(
+            File.Exists(Path.Combine(payloadPath, "recover084.ghost.mpack.gz")),
+            "Recovery must not delete corrupt files."
+        );
+        var large = Payload("expanded", "account-a");
+        large.ReplayPayload.SpawnMessageBytes = new byte[65 * 1024 * 1024];
+        var bytes = GhostBattlePayloadCodec.Serialize(large);
+        Check(
+            !GhostBattlePayloadCodec.TryDeserialize(bytes, out _, out var reason, out _)
+                && reason == "payload_too_large",
+            "Decompression must enforce its byte limit before deserialization."
+        );
+        CheckInvalidDetailMessage(db, repository, data, payloadPath);
+        Console.WriteLine(
+            "Ghost recovery: 1 stale row expired; 86 hidden rows, 2 valid files across three pages; corrupt, missing, wrong-account and oversized files retained."
+        );
+    }
+
+    // The detail error message reaches the History status line; a decode failure must not
+    // replace the friendly text with a serializer message.
+    private static void CheckInvalidDetailMessage(
+        SqliteConnection db,
+        HistoryPanelRepository repository,
+        HistoryPanelDataService data,
+        string payloadPath
+    )
+    {
+        using (var update = db.CreateCommand())
+        {
+            update.CommandText =
+                "UPDATE battles SET download_url='https://example.invalid/r', download_url_expires_at_ms=0 WHERE battle_id='recover000';";
+            update.ExecuteNonQuery();
+        }
+        using (var output = new MemoryStream())
+        {
+            using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+                gzip.WriteByte(0xC1);
+            File.WriteAllBytes(
+                Path.Combine(payloadPath, "recover000.ghost.mpack.gz"),
+                output.ToArray()
+            );
+        }
+        var row = repository
+            .ListGhostBattles("account-a", GhostBattleFilter.All, false, new())
+            .Rows.Single(value => value.BattleId == "recover000");
+        try
+        {
+            data.LoadDetail(row, "account-a");
+            Check(false, "An undecodable Ghost payload must fail detail loading.");
+        }
+        catch (InvalidDataException ex)
+        {
+            Check(
+                ex.Message == "Ghost payload is invalid or exceeds its size limit."
+                    && ex.InnerException != null,
+                "Detail failure keeps the friendly text and carries the decode cause: " + ex
+            );
+        }
+    }
+
+    private static GhostBattlePayload Payload(string id, string account) =>
+        new()
+        {
+            BattleId = id,
+            PerspectiveVersion = 1,
+            BattleManifest = new PvpBattleManifest
+            {
+                BattleId = id,
+                Participants = new() { PlayerAccountId = "uploader", OpponentAccountId = account },
+            },
+            ReplayPayload = new PvpReplayPayload
+            {
+                BattleId = id,
+                SpawnMessageBytes = [1],
+                CombatMessageBytes = [2],
+            },
+        };
+
+    private static void Check(bool value, string message)
+    {
+        if (!value)
+            throw new InvalidOperationException(message);
+    }
+}

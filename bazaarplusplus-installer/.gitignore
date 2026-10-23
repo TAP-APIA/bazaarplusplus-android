@@ -1,0 +1,41 @@
+# Frontend build output
+/build/
+/.vite/
+vite.config.ts.timestamp-*
+
+# Generated audits and review artifacts (see AGENTS.md)
+/tmp/
+
+# Tauri / Rust build output
+/src-tauri/target/
+/src-tauri/gen/schemas/
+/src-tauri/icons/macos-generated/
+
+# The macOS launch trampoline is compiled at build time from the committed
+# src-tauri/trampoline/bpp_launcher.c. Never commit the compiled binary.
+/src-tauri/resources/Trampoline/
+
+# Mod build outputs staged into SourceForBuild during packaging.
+BepInEx.zip
+BazaarPlusPlus.dll
+BazaarPlusPlus.version
+BazaarPlusPlus.ModApi.dll
+BazaarPlusPlus.Storage.dll
+BazaarPlusPlus.Localization.dll
+BazaarPlusPlus.history-database.json
+
+# Retired recorder binaries are forbidden in release Payloads; ignore local leftovers.
+/src-tauri/resources/SourceForBuild/*/BepInEx/plugins/ffmpeg
+/src-tauri/resources/SourceForBuild/*/BepInEx/plugins/ffmpeg.exe
+/src-tauri/resources/SourceForBuild/*/BepInEx/plugins/ffmpeg-LICENSE.txt
+
+# Machine-local provenance receipts and generated archive checksums.
+/src-tauri/resources/BepInExSource/*/payload-build.json
+/src-tauri/resources/BepInExSource/*/BepInEx.zip.manifest.json
+/src-tauri/resources/BepInExSource/*/BepInEx.zip.tmp-*
+/src-tauri/resources/BepInExSource/*/BepInEx.zip.manifest.json.tmp-*
+
+# Throwaway fixtures from scripts/bundle.test.mjs; removed after each run and
+# left behind only when a run is interrupted.
+.bpp-signing-test-*/
+.bpp-deps-test-*/

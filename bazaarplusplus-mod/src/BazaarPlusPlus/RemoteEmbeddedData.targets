@@ -1,0 +1,74 @@
+<Project>
+  <PropertyGroup>
+    <VoiceLinesRemoteUrl Condition="'$(VoiceLinesRemoteUrl)' == ''"
+      >https://bazaarline-installer.bazaarplusplus.com/data/voice-lines.json</VoiceLinesRemoteUrl>
+    <TenWinBuildsRemoteUrl Condition="'$(TenWinBuildsRemoteUrl)' == ''"
+      >https://bpp-metrics-v6.bazaarplusplus.com/builds/latest.json</TenWinBuildsRemoteUrl>
+    <RemoteEmbeddedDataDirectory Condition="'$(RemoteEmbeddedDataDirectory)' == ''"
+      >$(MSBuildThisFileDirectory)obj/remote-data</RemoteEmbeddedDataDirectory>
+    <TenWinBuildsEmbeddedSeed>$(MSBuildThisFileDirectory)Data/BuildRecommendations/builds.json</TenWinBuildsEmbeddedSeed>
+    <TenWinBuildsDownloadedPath Condition="'$(TenWinBuildsDownloadedPath)' == ''"
+      >$(RemoteEmbeddedDataDirectory)/builds.json</TenWinBuildsDownloadedPath>
+    <ForceRemoteEmbeddedDataRefresh Condition="'$(ForceRemoteEmbeddedDataRefresh)' == ''"
+      >false</ForceRemoteEmbeddedDataRefresh>
+    <RemoteEmbeddedDataFetcherProject Condition="'$(RemoteEmbeddedDataFetcherProject)' == ''"
+      >$(MSBuildThisFileDirectory)../../build/RemoteEmbeddedDataFetcher/RemoteEmbeddedDataFetcher.csproj</RemoteEmbeddedDataFetcherProject>
+    <RemoteEmbeddedDataPrepared Condition="'$(RemoteEmbeddedDataPrepared)' == ''"
+      >false</RemoteEmbeddedDataPrepared>
+    <_ForceRemoteEmbeddedDataRefresh
+      Condition="'$(ForceRemoteEmbeddedDataRefresh)' == 'true' or ('$(BuildProductionPackage)' == 'true' and '$(RemoteEmbeddedDataPrepared)' != 'true')"
+      >true</_ForceRemoteEmbeddedDataRefresh>
+    <_ForceRemoteEmbeddedDataRefresh Condition="'$(_ForceRemoteEmbeddedDataRefresh)' == ''"
+      >false</_ForceRemoteEmbeddedDataRefresh>
+    <TenWinBuildsEmbeddedPath
+      Condition="'$(RemoteEmbeddedDataPrepared)' == 'true' or '$(_ForceRemoteEmbeddedDataRefresh)' == 'true'"
+      >$(TenWinBuildsDownloadedPath)</TenWinBuildsEmbeddedPath>
+    <TenWinBuildsEmbeddedPath Condition="'$(TenWinBuildsEmbeddedPath)' == ''"
+      >$(TenWinBuildsEmbeddedSeed)</TenWinBuildsEmbeddedPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RemoteEmbeddedData Include="voice-lines.json">
+      <Url>$(VoiceLinesRemoteUrl)</Url>
+      <LogicalName>BazaarPlusPlus.Data.VoiceSubtitles.voice-lines.json</LogicalName>
+      <MinBytes>102400</MinBytes>
+      <FetchWhenMissing>true</FetchWhenMissing>
+      <DestinationPath>$(RemoteEmbeddedDataDirectory)/voice-lines.json</DestinationPath>
+    </RemoteEmbeddedData>
+    <RemoteEmbeddedData Include="builds.json">
+      <Url>$(TenWinBuildsRemoteUrl)</Url>
+      <LogicalName>BazaarPlusPlus.Data.BuildRecommendations.builds.json</LogicalName>
+      <MinBytes>51200</MinBytes>
+      <FetchWhenMissing>false</FetchWhenMissing>
+      <DestinationPath>$(TenWinBuildsDownloadedPath)</DestinationPath>
+    </RemoteEmbeddedData>
+
+    <EmbeddedResource
+      Include="$(RemoteEmbeddedDataDirectory)/voice-lines.json"
+      LogicalName="BazaarPlusPlus.Data.VoiceSubtitles.voice-lines.json"
+    />
+    <EmbeddedResource
+      Include="$(TenWinBuildsEmbeddedPath)"
+      LogicalName="BazaarPlusPlus.Data.BuildRecommendations.builds.json"
+    />
+  </ItemGroup>
+
+  <Target Name="EnsureRemoteEmbeddedData" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <_RemoteEmbeddedDataToFetch
+        Include="@(RemoteEmbeddedData)"
+        Condition="
+          '$(_ForceRemoteEmbeddedDataRefresh)' == 'true'
+          or ('%(RemoteEmbeddedData.FetchWhenMissing)' == 'true'
+            and !Exists('%(RemoteEmbeddedData.DestinationPath)'))
+        "
+      />
+    </ItemGroup>
+    <Exec
+      Command="dotnet run --project &quot;$(RemoteEmbeddedDataFetcherProject)&quot; --no-launch-profile -- fetch &quot;%(_RemoteEmbeddedDataToFetch.Url)&quot; &quot;%(_RemoteEmbeddedDataToFetch.DestinationPath)&quot; &quot;%(_RemoteEmbeddedDataToFetch.MinBytes)&quot; &quot;$(BppVersion)&quot;"
+      Condition="'@(_RemoteEmbeddedDataToFetch)' != ''"
+    />
+  </Target>
+
+  <Target Name="FetchRemoteEmbeddedData" DependsOnTargets="EnsureRemoteEmbeddedData" />
+</Project>

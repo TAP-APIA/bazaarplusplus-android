@@ -1,0 +1,1800 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* Tailwind utilities read the product tokens; there is no second palette. */
+@theme {
+  --color-canvas: var(--bg-canvas);
+  --color-sidebar: var(--bg-sidebar);
+  --color-panel: var(--bg-panel);
+  --color-hover: var(--bg-hover);
+  --color-selected: var(--bg-selected);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg-1: var(--text-1);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+}
+
+/* Windows swaps in Noto Sans SC once the optional background download lands
+   (features/shared/notoSansSc.ts). */
+html[data-bpp-platform='windows'] {
+  --font-ui:
+    'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI',
+    'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+}
+html[data-bpp-platform='windows'][data-bpp-noto-sans-sc='ready'] {
+  --font-ui:
+    'Noto Sans SC', 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI',
+    sans-serif;
+}
+
+/* The root keeps the 16px default so Tailwind's rem scale is standard; the
+   app's 13px body size lives on body. */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg-canvas);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+}
+body {
+  font-size: 13px;
+  line-height: 1.55;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+::selection {
+  background: rgba(238, 142, 31, 0.32);
+  color: var(--text-1);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+.selectable,
+.selectable *,
+.user-content * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.bpp-spin {
+  animation: bpp-spin 0.8s linear infinite;
+}
+@keyframes bpp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Shell ─────────────────────────────────────────────────────────── */
+.bpp-app {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--bg-canvas);
+}
+.bpp-header {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  flex: none;
+  height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sidebar);
+}
+/* macOS draws its traffic lights over the title bar (overlay style). */
+html[data-bpp-titlebar='overlay'] .bpp-header {
+  padding-left: 78px;
+}
+html[data-bpp-titlebar='overlay'][data-bpp-fullscreen] .bpp-header {
+  padding-left: 14px;
+}
+html[data-bpp-platform='windows'] .bpp-header {
+  padding-right: 0;
+}
+.bpp-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.bpp-brand-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+.bpp-brand-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bpp-brand-version {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.bpp-header-actions {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 4px;
+}
+.bpp-header-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.bpp-header-actions-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--line-strong);
+}
+.bpp-header-icon-control {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-control);
+  color: var(--text-2);
+  background: transparent;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.bpp-header-icon-control:hover,
+.bpp-header-icon-control[aria-expanded='true'] {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.bpp-header-icon-control svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Header popovers and menus: the only floating layers in the shell. */
+.bpp-popover {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-panel);
+  background: var(--bg-selected);
+  box-shadow: var(--shadow-float);
+  color: var(--text-1);
+}
+.bpp-menu {
+  display: flex;
+  min-width: 232px;
+  flex-direction: column;
+  padding: 4px;
+  animation: bpp-float-in var(--t-base) var(--ease) both;
+}
+.bpp-menu.is-right {
+  right: 0;
+}
+/* Opens beside the rail, growing upward from its trigger. */
+.bpp-menu.is-beside {
+  top: auto;
+  bottom: 0;
+  left: calc(100% + 8px);
+}
+.bpp-menu.is-centered {
+  left: 50%;
+  translate: -50% 0;
+}
+.bpp-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  color: var(--text-1);
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+}
+.bpp-menu-item:hover,
+.bpp-menu-item:focus-visible {
+  background: var(--bg-hover);
+}
+.bpp-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--text-2);
+}
+.bpp-menu-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.bpp-menu-subtitle {
+  display: block;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.bpp-qr-popover {
+  left: 50%;
+  display: flex;
+  width: 232px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  opacity: 0;
+  pointer-events: none;
+  translate: -50% -4px;
+  transition:
+    opacity var(--t-base) var(--ease),
+    translate var(--t-base) var(--ease);
+}
+.group:hover > .bpp-qr-popover,
+.group:focus-within > .bpp-qr-popover {
+  opacity: 1;
+  pointer-events: auto;
+  translate: -50% 0;
+}
+.bpp-qr-image {
+  width: 168px;
+  height: 168px;
+  padding: 8px;
+  border-radius: var(--r-panel);
+  background: #fff;
+}
+.bpp-qr-image.is-round {
+  border-radius: 50%;
+}
+.bpp-qr-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+.bpp-qr-subtitle {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: center;
+}
+@keyframes bpp-float-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+.bpp-window-controls {
+  display: flex;
+  height: 100%;
+  margin-left: 4px;
+}
+.bpp-window-control-button {
+  display: inline-flex;
+  width: 46px;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: var(--text-2);
+  background: transparent;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.bpp-window-control-button:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.bpp-window-close-button:hover {
+  color: #fff;
+  background: #c42b1c;
+}
+
+.bpp-shell-body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+/* Icon rail: pages at the top, support and language at the foot. */
+.bpp-nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-sidebar);
+}
+.bpp-rail-item {
+  display: flex;
+  width: 58px;
+  height: 52px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.bpp-rail-item svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.bpp-rail-item:hover,
+.bpp-rail-item[aria-expanded='true'] {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.bpp-rail-item.is-active {
+  color: var(--text-1);
+  background: var(--bg-selected);
+}
+.bpp-rail-item.is-active svg {
+  color: var(--accent);
+}
+.bpp-rail-item:focus-visible {
+  outline-offset: -2px;
+}
+.bpp-nav-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+}
+.bpp-main {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.bpp-main:focus {
+  outline: none;
+}
+.bpp-main-inner {
+  width: 100%;
+  max-width: 1080px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 22px 28px 40px;
+}
+/* Route changes are instant; new content settles in without blocking input. */
+.bpp-route-page {
+  min-height: 100%;
+  animation: bpp-route-in 120ms var(--ease) both;
+}
+@keyframes bpp-route-in {
+  from {
+    opacity: 0.55;
+  }
+}
+
+/* ── Page structure ────────────────────────────────────────────────── */
+.bpp-page {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 16px;
+}
+.bpp-page-header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 12px;
+}
+.bpp-page-title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bpp-page-title:focus {
+  outline: none;
+}
+.bpp-page-meta {
+  color: var(--text-3);
+  font-size: 13px;
+}
+.bpp-page-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.bpp-section-title {
+  margin: 4px 0 -8px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+}
+.bpp-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--bg-panel);
+}
+.bpp-panel-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+.bpp-panel-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.bpp-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.bpp-row:last-child {
+  border-bottom: 0;
+}
+.bpp-row-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.bpp-row-title {
+  font-weight: 500;
+}
+.bpp-row-description {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-kv {
+  display: grid;
+  grid-template-columns: 136px minmax(0, 1fr) auto;
+  align-items: center;
+}
+.bpp-kv > * {
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: center;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.bpp-kv > :nth-last-child(-n + 3) {
+  border-bottom: 0;
+}
+.bpp-kv-key {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.bpp-kv-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bpp-kv-value.is-empty {
+  color: var(--text-3);
+}
+.bpp-kv-actions {
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────── */
+.bpp-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.bpp-btn svg {
+  flex: none;
+}
+.bpp-btn-md {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.bpp-btn-md svg {
+  width: 15px;
+  height: 15px;
+}
+.bpp-btn-sm {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+.bpp-btn-sm svg {
+  width: 13px;
+  height: 13px;
+}
+.bpp-btn-icon {
+  width: 32px;
+  height: 32px;
+}
+.bpp-btn-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.bpp-btn-icon-sm {
+  width: 26px;
+  height: 26px;
+}
+.bpp-btn-icon-sm svg {
+  width: 14px;
+  height: 14px;
+}
+.bpp-btn-primary {
+  color: var(--on-accent);
+  background: var(--accent);
+  font-weight: 600;
+}
+.bpp-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.bpp-btn-secondary {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+  background: var(--bg-panel);
+}
+.bpp-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.bpp-btn-ghost {
+  color: var(--text-2);
+  background: transparent;
+}
+.bpp-btn-ghost:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.bpp-btn-danger {
+  border-color: rgba(229, 88, 78, 0.35);
+  color: var(--danger-text);
+  background: var(--danger-subtle);
+}
+.bpp-btn-danger:hover:not(:disabled) {
+  background: rgba(229, 88, 78, 0.22);
+}
+.bpp-btn:disabled,
+.bpp-btn[aria-disabled='true'] {
+  opacity: 0.45;
+}
+.bpp-btn[data-busy] {
+  opacity: 0.8;
+}
+/* Both labels share one grid cell so the button keeps the wider width. */
+.bpp-busy-label {
+  display: inline-grid;
+}
+.bpp-busy-label > * {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+.bpp-busy-label > [aria-hidden='true'] {
+  visibility: hidden;
+}
+
+/* ── Badges ────────────────────────────────────────────────────────── */
+.bpp-badge {
+  display: inline-flex;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 11px;
+  color: var(--text-2);
+  background: var(--bg-hover);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.bpp-badge::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+.bpp-badge.no-dot::before {
+  display: none;
+}
+.bpp-badge-ok {
+  color: var(--success);
+  background: var(--success-subtle);
+}
+.bpp-badge-warn {
+  color: var(--warning);
+  background: var(--warning-subtle);
+}
+.bpp-badge-bad {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+.bpp-badge-busy,
+.bpp-badge-accent {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.bpp-badge-busy::before {
+  animation: bpp-pulse 1.2s ease-in-out infinite;
+}
+@keyframes bpp-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Run outcome tiers mirror the mod's HistoryPanelFormatter tiers. */
+.bpp-outcome {
+  --tier: var(--text-2);
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 11px;
+  color: var(--tier);
+  background: color-mix(in srgb, var(--tier) 14%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bpp-outcome[data-tier='misfortune'] {
+  --tier: var(--text-3);
+}
+.bpp-outcome[data-tier='bronze'] {
+  --tier: #c8915f;
+}
+.bpp-outcome[data-tier='silver'] {
+  --tier: #bfc3ca;
+}
+.bpp-outcome[data-tier='gold'] {
+  --tier: var(--accent);
+}
+.bpp-outcome[data-tier='diamond'] {
+  --tier: #7cc6ee;
+}
+.bpp-outcome[data-state='active'] {
+  --tier: var(--success);
+}
+
+/* ── Banners ───────────────────────────────────────────────────────── */
+.bpp-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--bg-panel);
+  font-size: 13px;
+}
+.bpp-banner.is-warning {
+  border-color: rgba(217, 163, 59, 0.3);
+  background: var(--warning-subtle);
+}
+.bpp-banner.is-error {
+  border-color: rgba(229, 88, 78, 0.3);
+  background: var(--danger-subtle);
+}
+.bpp-banner.is-success {
+  border-color: rgba(69, 178, 107, 0.3);
+  background: var(--success-subtle);
+}
+.bpp-banner-icon {
+  display: flex;
+  margin-top: 2px;
+  color: var(--text-2);
+}
+.is-warning > .bpp-banner-icon {
+  color: var(--warning);
+}
+.is-error > .bpp-banner-icon {
+  color: var(--danger);
+}
+.is-success > .bpp-banner-icon {
+  color: var(--success);
+}
+.bpp-banner-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+.bpp-banner-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.bpp-banner-diagnostic summary {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.bpp-banner-diagnostic pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--r-control);
+  color: var(--text-2);
+  background: var(--bg-canvas);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+/* ── Toasts (Popover API top layer, above modals) ──────────────────── */
+.bpp-toast-viewport {
+  position: fixed;
+  inset: unset;
+  top: 52px;
+  right: 16px;
+  margin: 0;
+  display: flex;
+  width: min(340px, calc(100vw - 32px));
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  color: inherit;
+  pointer-events: none;
+}
+.bpp-toast-viewport:popover-open {
+  display: flex;
+}
+.bpp-toast {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  min-width: 240px;
+  max-width: 340px;
+  gap: 8px;
+  padding: 9px 8px 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-panel);
+  background: var(--bg-selected);
+  box-shadow: var(--shadow-float);
+  opacity: 0;
+  pointer-events: auto;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--t-base) var(--ease),
+    transform var(--t-base) var(--ease);
+}
+.bpp-toast.is-present {
+  opacity: 1;
+  transform: none;
+}
+.bpp-toast.is-closing {
+  transition-duration: var(--t-fast);
+}
+.bpp-toast-icon {
+  margin-top: 2px;
+  color: var(--text-2);
+}
+.bpp-toast.is-success .bpp-toast-icon {
+  color: var(--success);
+}
+.bpp-toast.is-warning .bpp-toast-icon {
+  color: var(--warning);
+}
+.bpp-toast.is-error .bpp-toast-icon {
+  color: var(--danger);
+}
+.bpp-toast-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.bpp-toast-message {
+  margin: 0;
+  font-size: 13px;
+}
+.bpp-toast-action {
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+.bpp-toast-action:hover {
+  color: var(--accent-hover);
+}
+.bpp-toast-close {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-control);
+  color: var(--text-2);
+  background: transparent;
+}
+.bpp-toast-close:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+
+/* ── Dialogs ───────────────────────────────────────────────────────── */
+/* Native modal via <dialog>: top-layer, Escape-to-close, focus trap and a
+   real backdrop from the platform. The dialog fills the viewport and centers
+   its card; ::backdrop dims without blur. */
+.bpp-dialog {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
+  align-items: center;
+  justify-content: center;
+}
+.bpp-dialog[open] {
+  display: flex;
+}
+.bpp-dialog:focus {
+  outline: none;
+}
+.bpp-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.bpp-dialog-card {
+  display: flex;
+  width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-dialog);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-float);
+  animation: bpp-float-in var(--t-base) var(--ease) both;
+}
+.bpp-dialog-card.is-sm {
+  max-width: 380px;
+}
+.bpp-dialog-card.is-md {
+  max-width: 440px;
+}
+.bpp-dialog-card.is-lg {
+  max-width: 520px;
+}
+.bpp-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 14px 0 18px;
+}
+.bpp-dialog-icon {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  background: var(--bg-hover);
+}
+.bpp-dialog-icon.is-accent {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.bpp-dialog-icon.is-danger {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+.bpp-dialog-heading {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 5px;
+}
+.bpp-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.bpp-dialog-subtitle {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.bpp-dialog-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 14px 18px 16px;
+  color: var(--text-2);
+}
+.bpp-dialog-body p {
+  margin: 0;
+}
+.bpp-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+.bpp-confirm-blocked-status {
+  margin: 0 auto 0 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-confirm-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-1);
+}
+.bpp-confirm-ack input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.bpp-confirm-note {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  color: var(--text-1);
+  background: var(--bg-canvas);
+}
+.bpp-confirm-note.is-danger {
+  border-color: rgba(229, 88, 78, 0.28);
+  background: var(--danger-subtle);
+}
+.bpp-confirm-note.is-warning {
+  border-color: rgba(217, 163, 59, 0.28);
+  background: var(--warning-subtle);
+}
+.bpp-confirm-note-icon {
+  display: flex;
+  margin-top: 2px;
+  color: var(--text-2);
+}
+.bpp-confirm-note.is-danger .bpp-confirm-note-icon {
+  color: var(--danger);
+}
+.bpp-confirm-note.is-warning .bpp-confirm-note-icon {
+  color: var(--warning);
+}
+.bpp-confirm-note-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.bpp-confirm-note-body p {
+  margin: 0;
+}
+.bpp-confirm-target {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  color: var(--text-2);
+  background: var(--bg-canvas);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.bpp-dialog-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bpp-dialog-link:hover {
+  color: var(--accent-hover);
+}
+.bpp-video-delete-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.bpp-video-delete-summary dt {
+  color: var(--text-3);
+}
+.bpp-video-delete-summary dd {
+  margin: 0;
+  color: var(--text-1);
+}
+.bpp-video-delete-diagnostics {
+  margin-top: 8px;
+  font-family: var(--font-ui);
+}
+.bpp-video-delete-diagnostics summary {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.bpp-video-delete-diagnostics p {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+}
+.bpp-details {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  background: var(--bg-canvas);
+  font-size: 12px;
+}
+.bpp-details summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+}
+.bpp-details summary::-webkit-details-marker {
+  display: none;
+}
+.bpp-details[open] .bpp-details-chevron {
+  rotate: 90deg;
+}
+.bpp-details-chevron {
+  transition: rotate var(--t-fast) var(--ease);
+}
+
+/* ── Form controls ─────────────────────────────────────────────────── */
+.bpp-input,
+.bpp-select {
+  height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-control);
+  color: var(--text-1);
+  background: var(--bg-canvas);
+  font-size: 13px;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.bpp-input::placeholder {
+  color: var(--text-3);
+}
+.bpp-input:focus,
+.bpp-select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.bpp-input:disabled,
+.bpp-select:disabled {
+  opacity: 0.5;
+}
+.bpp-input.is-readonly {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bpp-select {
+  appearance: none;
+  padding-right: 28px;
+}
+.bpp-select-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.bpp-select-wrap > svg {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  color: var(--text-3);
+  pointer-events: none;
+  translate: 0 -50%;
+}
+.bpp-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.bpp-field-label {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.bpp-field-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-field-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.bpp-segmented-control {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--bg-canvas);
+}
+.bpp-segmented-label {
+  position: relative;
+  display: inline-flex;
+}
+.bpp-segmented-input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.bpp-segmented-option {
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.bpp-segmented-label:hover .bpp-segmented-option {
+  color: var(--text-1);
+}
+.bpp-segmented-input:checked + .bpp-segmented-option {
+  color: var(--text-1);
+  background: var(--bg-selected);
+}
+.bpp-segmented-input:focus-visible + .bpp-segmented-option {
+  outline: 2px solid var(--accent);
+}
+.bpp-segmented-input:disabled + .bpp-segmented-option {
+  opacity: 0.45;
+}
+
+/* ── Empty and loading states ──────────────────────────────────────── */
+.bpp-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 16px;
+  color: var(--text-2);
+  text-align: center;
+}
+.bpp-empty-state-icon {
+  display: flex;
+  color: var(--text-3);
+}
+.bpp-empty-state-heading {
+  margin: 4px 0 0;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.bpp-empty-state-description {
+  max-width: 44ch;
+  margin: 0;
+}
+.bpp-empty-state-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.bpp-loading-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  color: var(--text-2);
+  background: var(--bg-panel);
+}
+.bpp-inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* Folded section: a summary row that opens a list of rows. */
+.bpp-disclosure-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  list-style: none;
+}
+.bpp-disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+.bpp-disclosure-summary > svg {
+  flex: none;
+  color: var(--text-3);
+  transition: rotate var(--t-fast) var(--ease);
+}
+.bpp-disclosure-summary:hover > svg {
+  color: var(--text-1);
+}
+.bpp-disclosure[open] > .bpp-disclosure-summary {
+  border-bottom: 1px solid var(--line);
+}
+.bpp-disclosure[open] > .bpp-disclosure-summary > svg {
+  rotate: 180deg;
+}
+
+/* ── Install ───────────────────────────────────────────────────────── */
+.bpp-install-status-top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.bpp-install-status-logo {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 9px;
+}
+.bpp-install-status-name {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+.bpp-install-status-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.bpp-install-status-description {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+/* ── History ───────────────────────────────────────────────────────── */
+.bpp-history-overview-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+}
+.bpp-history-stats {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+  margin: 0;
+}
+.bpp-history-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.bpp-history-stat-label {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-history-stat-reading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+}
+.bpp-history-stat-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.bpp-history-stat.is-accent .bpp-history-stat-value {
+  color: var(--accent);
+}
+.bpp-history-stat-detail {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-history-cleanup-chevron {
+  transition: rotate var(--t-fast) var(--ease);
+}
+[aria-expanded='true'] > .bpp-history-cleanup-chevron {
+  rotate: 180deg;
+}
+.bpp-history-cleanup-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--t-base) var(--ease);
+}
+.bpp-history-overview.is-open .bpp-history-cleanup-reveal {
+  grid-template-rows: 1fr;
+}
+.bpp-history-cleanup-content {
+  min-height: 0;
+  overflow: hidden;
+}
+.bpp-history-overview.is-open .bpp-history-cleanup-content {
+  border-top: 1px solid var(--line);
+}
+.bpp-history-cleanup-content > .bpp-banner {
+  margin: 12px 16px 0;
+}
+.bpp-history-cleanup-outcome {
+  margin: 0;
+  padding: 0 16px 12px;
+  color: var(--success);
+  font-size: 12px;
+}
+/* Each run is a card led by its end-of-run board screenshot. */
+.bpp-history-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  container-type: inline-size;
+}
+.bpp-history-run-card {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  color: inherit;
+  background: var(--bg-panel);
+  text-decoration: none;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+.bpp-history-run-card:hover {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+}
+.bpp-history-run-card:focus-visible {
+  outline-offset: 2px;
+}
+/* Keep the reference composition at every width: the strip sets the row
+   height, and the facts scale with the list using container-relative type. */
+.bpp-history-run-preview {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 71%;
+  aspect-ratio: 2004 / 428;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--bg-canvas);
+}
+.bpp-history-run-preview-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.bpp-history-run-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+  color: var(--text-3);
+  font-size: 1.5cqw;
+}
+.bpp-history-run-info {
+  display: flex;
+  width: 29%;
+  flex: none;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3em;
+  padding: 0.5em 0.8em;
+  font-size: 1.5cqw;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.bpp-history-run-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.bpp-history-run-hero {
+  font-size: 1.15em;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Wins and rating lead; days and the full timestamp remain supporting facts. */
+.bpp-history-run-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5em;
+  margin-block: auto;
+}
+.bpp-history-run-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  text-align: center;
+}
+.bpp-history-run-metric-value {
+  font-size: 1.9em;
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.bpp-history-run-wins {
+  color: var(--accent);
+}
+.bpp-history-rating-delta {
+  margin-inline-start: 0.3em;
+  font-size: 0.55em;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text-2);
+}
+.bpp-history-rating-delta[data-trend='up'] {
+  color: var(--success);
+}
+.bpp-history-rating-delta[data-trend='down'] {
+  color: var(--danger);
+}
+.bpp-history-run-metric-label,
+.bpp-history-run-days,
+.bpp-history-run-footer {
+  color: var(--text-2);
+  font-size: 1em;
+  font-weight: 400;
+}
+.bpp-history-run-metric-label {
+  overflow-wrap: anywhere;
+}
+.bpp-history-run-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25em 0.5em;
+}
+.bpp-history-run-when {
+  display: block;
+  white-space: normal;
+}
+.bpp-history-run-days {
+  white-space: nowrap;
+}
+.bpp-history-run-metric .bpp-outcome,
+.bpp-history-run-metric .bpp-history-run-days {
+  margin-top: 0.3em;
+  font-size: 0.75em;
+  line-height: 1.2;
+}
+.bpp-history-run-metric .bpp-outcome {
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  white-space: normal;
+}
+.bpp-history-run-chevron {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  margin-left: auto;
+  color: var(--text-2);
+}
+.bpp-history-run-card:hover .bpp-history-run-chevron {
+  color: var(--text-1);
+}
+.bpp-history-run-preview-empty svg {
+  width: 1.5em;
+  height: 1.5em;
+}
+.bpp-history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Run detail ────────────────────────────────────────────────────── */
+.bpp-run-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+}
+.bpp-run-detail-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  border-right: 1px solid var(--line);
+}
+.bpp-run-detail-stat:last-child {
+  border-right: 0;
+}
+.bpp-run-detail-stat-label {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-run-detail-stat-value {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bpp-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.bpp-table th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.bpp-table td {
+  overflow: hidden;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bpp-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.bpp-table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+.bpp-table .is-num {
+  font-variant-numeric: tabular-nums;
+}
+.bpp-table .is-muted {
+  color: var(--text-2);
+}
+
+/* ── About ─────────────────────────────────────────────────────────── */
+.bpp-credit-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bpp-credit-group {
+  margin: 0;
+  padding: 10px 16px 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+}
+.bpp-credit-list + .bpp-credit-group,
+div + div > .bpp-credit-group {
+  border-top: 1px solid var(--line);
+}
+.bpp-credit-item {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.bpp-credit-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--text-1);
+  font-weight: 500;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+a.bpp-credit-name:hover {
+  color: var(--accent);
+}
+.bpp-credit-role {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bpp-panel-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  list-style: none;
+  font-weight: 600;
+}
+.bpp-panel-summary::-webkit-details-marker {
+  display: none;
+}
+details[open] > .bpp-panel-summary {
+  border-bottom: 1px solid var(--line);
+}
+details[open] > .bpp-panel-summary > svg {
+  rotate: 180deg;
+}
+
+/* ── Native-feel base: this is a desktop app, not a web page ─────────── */
+@layer base {
+  /* Desktop apps use the arrow cursor everywhere; only text fields get a
+     caret. Listed explicitly so this beats Preflight's button cursor, while
+     Tailwind cursor-* utilities (utilities layer) still win where opted in. */
+  *,
+  *::before,
+  *::after {
+    cursor: default;
+  }
+  a,
+  button,
+  [role='button'],
+  label,
+  summary,
+  select {
+    cursor: default;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  [contenteditable='true'] {
+    cursor: text;
+  }
+
+  /* Chrome is not selectable; opt real content back in with .selectable. */
+  :root {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  input:not([type='checkbox']):not([type='radio']),
+  textarea,
+  [contenteditable='true'] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+}
+
+/* Thin, themed scrollbars everywhere. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background-clip: padding-box;
+  background-color: var(--line-strong);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #4a4640;
+}
+
+/* Respect the OS "reduce motion" setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

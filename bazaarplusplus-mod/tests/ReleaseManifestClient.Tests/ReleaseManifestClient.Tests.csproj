@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <BppReferenceGameLibraries>true</BppReferenceGameLibraries>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile
+      Include="../../src/BazaarPlusPlus/Infrastructure/ReleaseManifest/ReleaseManifestClient.cs"
+      Link="ReleaseManifestClient.cs"
+    />
+    <Compile
+      Include="../../src/BazaarPlusPlus/Infrastructure/ReleaseManifest/ReleaseManifestEndpoints.cs"
+      Link="ReleaseManifestEndpoints.cs"
+    />
+    <Compile
+      Include="../../src/BazaarPlusPlus/Game/Lobby/ReleaseManifestCheckLifecycle.cs"
+      Link="ReleaseManifestCheckLifecycle.cs"
+    />
+    <Compile Include="Program.cs" />
+    <Content
+      Include="../../../release/fixtures/latest.json"
+      Link="fixtures/latest.json"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <Content
+      Include="../../../release/fixtures/latest/windows-x86_64.json"
+      Link="fixtures/latest/windows-x86_64.json"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <Content
+      Include="../../../release/fixtures/latest/darwin-aarch64.json"
+      Link="fixtures/latest/darwin-aarch64.json"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+  </ItemGroup>
+</Project>

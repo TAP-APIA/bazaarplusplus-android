@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);BPP_ANDROID</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../BazaarPlusPlus/bazaarplusplus-mod/src/BazaarPlusPlus/Game/CombatReplay/CombatReplayPersistenceQueue.cs" Link="CombatReplayPersistenceQueue.cs" />
+    <Compile Include="../../BazaarPlusPlus/bazaarplusplus-mod/src/BazaarPlusPlus/Game/CombatReplay/ReplayPayloadOperationGate.cs" Link="ReplayPayloadOperationGate.cs" />
+    <Compile Include="../../BazaarPlusPlus/bazaarplusplus-mod/src/BazaarPlusPlus/Game/PvpBattles/PvpReplayPayload.cs" Link="PvpReplayPayload.cs" />
+  </ItemGroup>
+</Project>

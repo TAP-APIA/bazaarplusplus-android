@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <BppReferenceGameLibraries>true</BppReferenceGameLibraries>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/BazaarPlusPlus/BazaarPlusPlus.csproj" />
+    <Reference Include="BazaarGameShared">
+      <HintPath>$(ManagedPath)/BazaarGameShared.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../Shared/LocalizationTestBootstrap.cs" Link="LocalizationTestBootstrap.cs" />
+    <EmbeddedResource
+      Include="../../../bazaarplusplus-server/contracts/v6/ghost-summary.response.json"
+      LogicalName="GhostBattleSync.Tests.ghost-summary.response.json"
+    />
+  </ItemGroup>
+</Project>

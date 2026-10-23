@@ -1,0 +1,872 @@
+{
+  "manifests": {
+    "run-only": {
+      "bundle_id": "<ulid>",
+      "bundle_version": 6,
+      "created_at_ms": 0,
+      "run": {
+        "run_id": "run-seal-001",
+        "player_account_id": "account-001",
+        "run_format_version": 6,
+        "projection": {
+          "run": {},
+          "battles": [
+            {
+              "battle_id": "battle-seal-001",
+              "recorded_at_ms": 4070908830000,
+              "day": 1,
+              "hour": 1,
+              "encounter_id": null,
+              "combat_kind": "PVPCombat",
+              "result": "win",
+              "winner_combatant_id": "Player",
+              "loser_combatant_id": "Opponent",
+              "is_final_battle": true,
+              "player": {
+                "account_id": "account-001",
+                "display_name": "Player",
+                "hero_id": null,
+                "hero_name": "Vanessa",
+                "rank": null,
+                "rating": null,
+                "level": null,
+                "prestige": null,
+                "victories": null
+              },
+              "opponent": {
+                "account_id": "account-002",
+                "display_name": "Opponent",
+                "hero_id": null,
+                "hero_name": "Pygmalien",
+                "rank": null,
+                "rating": null,
+                "level": null,
+                "prestige": null,
+                "victories": null
+              }
+            }
+          ]
+        },
+        "payload": {
+          "offset": 0,
+          "length": "<normalized>",
+          "sha256": "<normalized>",
+          "content_type": "application/x-bpp-run-v6"
+        }
+      }
+    },
+    "screenshot": {
+      "bundle_id": "<ulid>",
+      "bundle_version": 6,
+      "created_at_ms": 0,
+      "run": {
+        "run_id": "run-screenshot",
+        "player_account_id": "account-001",
+        "run_format_version": 6,
+        "projection": {
+          "run": {},
+          "battles": []
+        },
+        "payload": {
+          "offset": 0,
+          "length": "<normalized>",
+          "sha256": "<normalized>",
+          "content_type": "application/x-bpp-run-v6"
+        }
+      },
+      "screenshot": {
+        "offset": "<normalized>",
+        "length": "<normalized>",
+        "sha256": "<normalized>",
+        "content_type": "image/jpeg",
+        "width": 96,
+        "height": 64,
+        "quality": 90,
+        "captured_at_ms": 4070912510000
+      }
+    },
+    "screenshot-deadline": {
+      "bundle_id": "<ulid>",
+      "bundle_version": 6,
+      "created_at_ms": 0,
+      "run": {
+        "run_id": "run-waits-for-screenshot",
+        "player_account_id": "account-001",
+        "run_format_version": 6,
+        "projection": {
+          "run": {},
+          "battles": []
+        },
+        "payload": {
+          "offset": 0,
+          "length": "<normalized>",
+          "sha256": "<normalized>",
+          "content_type": "application/x-bpp-run-v6"
+        }
+      }
+    },
+    "replay-free": {
+      "bundle_id": "<ulid>",
+      "bundle_version": 6,
+      "created_at_ms": 0,
+      "run": {
+        "run_id": "run-replay-free",
+        "player_account_id": "account-001",
+        "run_format_version": 6,
+        "projection": {
+          "run": {},
+          "battles": []
+        },
+        "payload": {
+          "offset": 0,
+          "length": "<normalized>",
+          "sha256": "<normalized>",
+          "content_type": "application/x-bpp-run-v6"
+        }
+      }
+    },
+    "replay-held": {
+      "bundle_id": "<ulid>",
+      "bundle_version": 6,
+      "created_at_ms": 0,
+      "run": {
+        "run_id": "run-replay-held",
+        "player_account_id": "account-001",
+        "run_format_version": 6,
+        "projection": {
+          "run": {},
+          "battles": []
+        },
+        "payload": {
+          "offset": 0,
+          "length": "<normalized>",
+          "sha256": "<normalized>",
+          "content_type": "application/x-bpp-run-v6"
+        }
+      }
+    },
+    "corrupt-replay": {
+      "bundle_id": "<ulid>",
+      "bundle_version": 6,
+      "created_at_ms": 0,
+      "run": {
+        "run_id": "run-corrupt-replay",
+        "player_account_id": "account-001",
+        "run_format_version": 6,
+        "projection": {
+          "run": {},
+          "battles": []
+        },
+        "payload": {
+          "offset": 0,
+          "length": "<normalized>",
+          "sha256": "<normalized>",
+          "content_type": "application/x-bpp-run-v6"
+        }
+      }
+    }
+  },
+  "checksums": {
+    "run-only.bundle": {
+      "decoded_bytes": "<normalized>",
+      "manifest_bytes": "<normalized>",
+      "sha256": "<normalized>",
+      "expected": "valid"
+    },
+    "screenshot.bundle": {
+      "decoded_bytes": "<normalized>",
+      "manifest_bytes": "<normalized>",
+      "sha256": "<normalized>",
+      "expected": "valid"
+    },
+    "screenshot-deadline.bundle": {
+      "decoded_bytes": "<normalized>",
+      "manifest_bytes": "<normalized>",
+      "sha256": "<normalized>",
+      "expected": "valid"
+    },
+    "replay-free.bundle": {
+      "decoded_bytes": "<normalized>",
+      "manifest_bytes": "<normalized>",
+      "sha256": "<normalized>",
+      "expected": "valid"
+    },
+    "replay-held.bundle": {
+      "decoded_bytes": "<normalized>",
+      "manifest_bytes": "<normalized>",
+      "sha256": "<normalized>",
+      "expected": "valid"
+    },
+    "corrupt-replay.bundle": {
+      "decoded_bytes": "<normalized>",
+      "manifest_bytes": "<normalized>",
+      "sha256": "<normalized>",
+      "expected": "valid"
+    }
+  },
+  "run_payloads": {
+    "run-only": {
+      "messagepack_bytes": 497,
+      "sha256": "28148cd95e121166be8b31b0ecf9a486be6abd462d574252d4a6c0c920f48db0"
+    },
+    "screenshot": {
+      "messagepack_bytes": 105,
+      "sha256": "414d626bdc30cf0f2cf08b5b84f3dfd37ab2104b8827da4c557bee1add635cb8"
+    },
+    "screenshot-deadline": {
+      "messagepack_bytes": 115,
+      "sha256": "5bc08047fae862af953bf51caa1f6ef8a42a1d419d6e0199376a6c87221c358e"
+    },
+    "replay-free": {
+      "messagepack_bytes": 106,
+      "sha256": "2593b5cf376757508ad23140e53fea83419a2aa7c740cdc314116deac90c59b8"
+    },
+    "replay-held": {
+      "messagepack_bytes": 106,
+      "sha256": "fa101f21ad07469ca63218741b413412d5624d1dbcbbf3b072af98270aaeaa41"
+    },
+    "corrupt-replay": {
+      "messagepack_bytes": 418,
+      "sha256": "a3d0ff6dc6921b44b0225c2f5f778f394e4ee9898b4036c8aeb5b3687f47054d"
+    }
+  },
+  "run_screenshots": {
+    "run-screenshot": [
+      {
+        "screenshot_id": "shot-primary-001",
+        "run_id": "run-screenshot",
+        "hero_name": "Vanessa",
+        "is_primary": 1,
+        "image_relative_path": "2099-01-01/2099-01-01_01-01-50-000_final_run-run-screenshot.png",
+        "captured_at_ms": 4070912510000,
+        "captured_utc_offset_minutes": 480,
+        "day": 10,
+        "player_rank": "Legendary",
+        "player_rating": 1533,
+        "player_position": 41,
+        "victories_at_capture": 10,
+        "capture_source": "end_of_run_auto"
+      }
+    ]
+  },
+  "queue": [
+    {
+      "step": "run-only",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-seal-001",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "screenshot",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 1,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "screenshot-deadline:waiting",
+      "bundle_seal_jobs": [
+        {
+          "run_id": "run-waits-for-screenshot",
+          "state": "waiting",
+          "screenshot_requested": 1,
+          "screenshot_state": "waiting",
+          "input_deadline_at_ms": "<utc>",
+          "bundle_id": null,
+          "created_at_ms": null,
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null
+        }
+      ],
+      "bundle_outbox": []
+    },
+    {
+      "step": "screenshot-deadline:sealed",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-waits-for-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "replay-persistence:held",
+      "bundle_seal_jobs": [
+        {
+          "run_id": "run-replay-held",
+          "state": "waiting",
+          "screenshot_requested": 0,
+          "screenshot_state": "not_requested",
+          "input_deadline_at_ms": "<utc>",
+          "bundle_id": null,
+          "created_at_ms": null,
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null
+        }
+      ],
+      "bundle_outbox": [
+        {
+          "run_id": "run-replay-free",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "replay-persistence:drained",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-replay-held",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "corrupt-replay:waiting",
+      "bundle_seal_jobs": [
+        {
+          "run_id": "run-corrupt-replay",
+          "state": "waiting",
+          "screenshot_requested": 0,
+          "screenshot_state": "not_requested",
+          "input_deadline_at_ms": "<utc>",
+          "bundle_id": null,
+          "created_at_ms": null,
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null
+        }
+      ],
+      "bundle_outbox": []
+    },
+    {
+      "step": "corrupt-replay:sealed",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-corrupt-replay",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "upload:transient",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-corrupt-replay",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-replay-free",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-replay-held",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 0,
+          "last_attempt_at_ms": null,
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 1,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": "http_503",
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-seal-001",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": "http_503",
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-waits-for-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": "http_503",
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "upload:commit-before-delete",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-corrupt-replay",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-replay-free",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-replay-held",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 1,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": "http_503",
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-seal-001",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": "http_503",
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        },
+        {
+          "run_id": "run-waits-for-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "pending",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": "http_503",
+          "failed_at_ms": null,
+          "uploaded_at_ms": null,
+          "server_outcome": null
+        }
+      ]
+    },
+    {
+      "step": "upload:drain",
+      "bundle_seal_jobs": [],
+      "bundle_outbox": [
+        {
+          "run_id": "run-corrupt-replay",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-replay-free",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-replay-held",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 1,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 1,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 2,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-seal-001",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 2,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        },
+        {
+          "run_id": "run-waits-for-screenshot",
+          "bundle_id": "<ulid>",
+          "file_name": "<ulid>.bundle",
+          "content_sha256_hex": "<normalized>",
+          "content_digest": "<normalized>",
+          "total_bytes": "<normalized>",
+          "has_screenshot": 0,
+          "sealed_at_ms": "<utc>",
+          "status": "uploaded",
+          "next_attempt_at_ms": "<utc>",
+          "attempts": 2,
+          "last_attempt_at_ms": "<utc>",
+          "last_error_code": null,
+          "failed_at_ms": null,
+          "uploaded_at_ms": "<utc>",
+          "server_outcome": "stored"
+        }
+      ]
+    }
+  ],
+  "uploads": [
+    {
+      "step": "transient",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:run-only>",
+      "length": "<normalized>",
+      "response_status": 503
+    },
+    {
+      "step": "transient",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:screenshot>",
+      "length": "<normalized>",
+      "response_status": 503
+    },
+    {
+      "step": "transient",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:screenshot-deadline>",
+      "length": "<normalized>",
+      "response_status": 503
+    },
+    {
+      "step": "commit-before-delete",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:replay-free>",
+      "length": "<normalized>",
+      "response_status": 201
+    },
+    {
+      "step": "commit-before-delete",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:replay-held>",
+      "length": "<normalized>",
+      "response_status": 201
+    },
+    {
+      "step": "commit-before-delete",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:corrupt-replay>",
+      "length": "<normalized>",
+      "response_status": 201
+    },
+    {
+      "step": "drain",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:run-only>",
+      "length": "<normalized>",
+      "response_status": 201
+    },
+    {
+      "step": "drain",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:screenshot>",
+      "length": "<normalized>",
+      "response_status": 201
+    },
+    {
+      "step": "drain",
+      "method": "POST",
+      "route": "/bundles",
+      "content_type": "application/x-bpp-bundle-v6",
+      "body": "<bundle:screenshot-deadline>",
+      "length": "<normalized>",
+      "response_status": 201
+    }
+  ]
+}

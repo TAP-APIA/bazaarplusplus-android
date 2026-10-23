@@ -1,0 +1,58 @@
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)build/ManagedPath.props" />
+  <Import Project="$(MSBuildThisFileDirectory)build/GameLibraries.props" />
+
+  <PropertyGroup>
+    <BppProductVersionFile>$(MSBuildThisFileDirectory)../VERSION</BppProductVersionFile>
+    <BppProductVersion>$([System.IO.File]::ReadAllText('$(BppProductVersionFile)').Trim())</BppProductVersion>
+    <BppVersion>$(BppProductVersion)</BppVersion>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Building the assembly graph is side-effect free by default. Only the deploy flag of `just mod::build` opts in to
+         writing the live game installation; tests, IDE builds, matrix builds, and publish staging
+         must never inherit deployment accidentally. -->
+    <BppDeployToGame Condition="'$(BppDeployToGame)' == ''">false</BppDeployToGame>
+  </PropertyGroup>
+
+  <Target Name="ValidateBppProductVersion" BeforeTargets="PrepareForBuild">
+    <Error
+      Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(BppProductVersion)', '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'))"
+      Text="VERSION must contain a stable major.minor.patch product version."
+    />
+    <Error
+      Condition="'$(BppVersion)' != '$(BppProductVersion)'"
+      Text="BppVersion cannot override the product VERSION. Update VERSION and run node release.mjs sync."
+    />
+  </Target>
+
+  <!-- Source-shadow scenario capsules intentionally remain separate assemblies: several define
+       incompatible game/runtime shims or mutate process-global state. ScenarioRunner.Tests is the
+       only xUnit project that executes them, one child process at a time. -->
+  <PropertyGroup>
+    <BppScenarioRunnerProjects>BundlePipeline.Tests;BundleQueueSqliteStore.Tests;BundleSealConvergence.Tests;BundleV6Codec.Tests;CollectionFilterEngine.Tests;CollectionGridLayout.Tests;CollectionSourceFiltering.Tests;CollectionViewState.Tests;CombatReplayAudioVideo.Tests;CombatReplayRecording.Tests;EndOfRunScreenshotGate.Tests;GhostBattleSync.Tests;HistoryPanelDecisions.Tests;HistoryPanelFactory.Tests;HistoryPanelFiltering.Tests;HistoryPanelPreview.Tests;HistoryPanelRepository.Tests;HotkeyBindingPath.Tests;ItemEnchantPreview.Tests;LiveBuildPanel.Tests;LiveBuildRecommendations.Tests;MainMenuVersionLabel.Tests;ModApi.Tests;NativeCardArtwork.Tests;OverlayPanelLifecycle.Tests;ReleaseManifestClient.Tests;RemoteEmbeddedDataPipeline.Tests;RunLoggingPipeline.Tests;StaticCardMapCompatibility.Tests;Storage.Tests;SupporterCatalogModule.Tests;Supporters.Tests;TooltipPreviewTargetResolver.Tests;UiFoundation.Tests;UpgradePreviewTooltip.Tests</BppScenarioRunnerProjects>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(BppEnableWarningGate)' == 'true'">
+    <!-- Source files are linked into test projects. Keep their implicit-using context identical so
+         IDE0005 does not produce contradictory results for the same file. -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- netstandard2.1 projects do not load the .NET analyzers by default; the
+         CA rules enabled in .editorconfig need them. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <!-- XML output is enabled so Roslyn can analyze IDE0005. Public API documentation is
+         not a repository deliverable, so suppress only the resulting missing-doc warning. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- macOS-only build accelerator: hardlink copy-local and obj->bin copies
+       (measured: warm touch-rebuild 5.9s -> 2.2s). Must stay off on Windows:
+       there, builds that mix hardlink and plain-copy modes (IDE builds force
+       these properties off) overwrite THROUGH shared inodes, silently corrupting
+       the NuGet cache and the game's Managed dir. macOS File.Copy unlinks the
+       destination first, so mixed mode is safe on APFS. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <CreateHardLinksForCopyFilesToOutputDirectoryIfPossible>true</CreateHardLinksForCopyFilesToOutputDirectoryIfPossible>
+    <CreateHardLinksForCopyLocalIfPossible>true</CreateHardLinksForCopyLocalIfPossible>
+  </PropertyGroup>
+</Project>

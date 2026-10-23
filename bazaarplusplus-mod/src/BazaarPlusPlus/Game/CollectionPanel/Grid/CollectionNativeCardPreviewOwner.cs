@@ -1,0 +1,177 @@
+#nullable enable
+using BazaarPlusPlus.Game.CollectionPanel.Tooltips;
+using BazaarPlusPlus.GameInterop.CardPreview;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using TheBazaar.UI;
+using UnityEngine;
+
+namespace BazaarPlusPlus.Game.CollectionPanel.Grid;
+
+internal sealed class CollectionNativeCardPreviewOwner : INativeCardPreviewOwner
+{
+    private readonly Transform _parent;
+    private readonly CollectionCardCacheSession _cacheSession;
+
+    internal CollectionNativeCardPreviewOwner(
+        Transform parent,
+        CollectionCardCacheSession cacheSession
+    )
+    {
+        _parent = parent ?? throw new ArgumentNullException(nameof(parent));
+        _cacheSession = cacheSession ?? throw new ArgumentNullException(nameof(cacheSession));
+    }
+
+    public int Layer => CollectionGridOverlay.DefaultLayer;
+
+    // The Collection display intentionally shows the game's premium/dynamic card-art path.
+    // This is an owner-scoped preview intent; it does not alter the player's equipped skins
+    // or the visual mode used by any other native preview consumer.
+    public bool UsePremiumVisuals => true;
+
+    public Transform ResolveParent(NativeCardPreviewSubject subject) => _parent;
+
+    public void PrepareWhileInactive(NativeCardPreviewOwnerContext context)
+    {
+        var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
+        if (marker == null)
+            marker = context.Root.AddComponent<CollectionPanelOwnedMarker>();
+        marker.CacheOwner = _cacheSession;
+        marker.PreviewOwner = this;
+
+        var hoverScale = context.Root.GetComponent<CollectionCardHoverScaleController>();
+        if (hoverScale == null)
+            hoverScale = context.Root.AddComponent<CollectionCardHoverScaleController>();
+        hoverScale.ResetImmediate();
+
+        var canvasGroup = context.Root.GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+            canvasGroup = context.Root.AddComponent<CanvasGroup>();
+        canvasGroup.alpha = 0f;
+    }
+
+    public void OnAcquired(NativeCardPreviewOwnerContext context)
+    {
+        var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
+        var tooltipData =
+            context.TooltipData ?? context.Root.GetComponent<CardPreviewBase>()?._tooltipData;
+        if (tooltipData == null || marker == null || marker.TooltipRegistered)
+            return;
+
+        CollectionTierTooltipRegistry.Register(tooltipData.CardInstance);
+        marker.TooltipRegistered = true;
+    }
+
+    public void BeforeRelease(NativeCardPreviewOwnerContext context)
+    {
+        context.Root.GetComponent<CollectionCardHoverScaleController>()?.ResetImmediate();
+        var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
+        var cardPreview = context.Root.GetComponent<CardPreviewBase>();
+        ReleaseOwnedState(marker, cardPreview, context.TooltipData ?? cardPreview?._tooltipData);
+    }
+
+    public void ReportFailure(NativeCardPreviewFailure failure)
+    {
+        if (
+            failure.Operation
+            is NativeCardPreviewOperation.InvokeHover
+                or NativeCardPreviewOperation.InvokeHoverOut
+        )
+        {
+            var operation =
+                failure.Operation == NativeCardPreviewOperation.InvokeHover
+                    ? CollectionHoverOperation.OnHover
+                    : CollectionHoverOperation.OnHoverOut;
+            BppLogField field = ("operation", operation);
+            if (failure.Exception == null)
+            {
+                BppLog.DebugEvent(
+                    new BppLogEvent(
+                        BppLogFeatureScope.CollectionPanel,
+                        "collection_panel.hover.invoke_failed"
+                    ),
+                    () => [field]
+                );
+            }
+            else
+            {
+                BppLog.DebugEvent(
+                    new BppLogEvent(
+                        BppLogFeatureScope.CollectionPanel,
+                        "collection_panel.hover.invoke_failed"
+                    ),
+                    failure.Exception,
+                    () => [field]
+                );
+            }
+            return;
+        }
+
+        var fields = new BppLogField[]
+        {
+            ("stage", CollectionCardBindStage.Bind),
+            ("template_id", failure.TemplateId ?? Guid.Empty),
+            ("reason_code", MapFailureReason(failure)),
+        };
+        if (failure.Exception == null)
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.CollectionPanel,
+                    "collection_panel.card.bind_degraded",
+                    storm: ["stage", "reason_code"]
+                ),
+                fields
+            );
+        else
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.CollectionPanel,
+                    "collection_panel.card.bind_degraded",
+                    storm: ["stage", "reason_code"]
+                ),
+                failure.Exception,
+                fields
+            );
+    }
+
+    internal void OnNativeDestroyed(CardPreviewBase cardPreview)
+    {
+        var marker = cardPreview.GetComponent<CollectionPanelOwnedMarker>();
+        ReleaseOwnedState(marker, cardPreview, cardPreview._tooltipData);
+    }
+
+    private static void ReleaseOwnedState(
+        CollectionPanelOwnedMarker? marker,
+        CardPreviewBase? cardPreview,
+        TheBazaar.Tooltips.CardTooltipData? tooltipData
+    )
+    {
+        if (tooltipData != null && marker?.TooltipRegistered == true)
+        {
+            CollectionTierTooltipRegistry.Unregister(tooltipData.CardInstance);
+            marker.TooltipRegistered = false;
+        }
+
+        marker?.ReleaseCurrentArtKey();
+        if (marker != null)
+            marker.OnArtLoaded = null;
+        if (cardPreview != null && marker?.CardMaterialOwnedByCache == true)
+            cardPreview._cardMaterial = null!;
+    }
+
+    internal static CollectionPanelLogReasonCode MapFailureReason(
+        NativeCardPreviewFailure failure
+    ) =>
+        failure.Reason switch
+        {
+            NativeCardPreviewFailureReason.StaticDataUnavailable =>
+                CollectionPanelLogReasonCode.StaticDataNotReady,
+            NativeCardPreviewFailureReason.TemplateUnavailable =>
+                CollectionPanelLogReasonCode.TemplateLookupFailed,
+            NativeCardPreviewFailureReason.SetUpException
+            or NativeCardPreviewFailureReason.ResizeException
+            or NativeCardPreviewFailureReason.ShowException =>
+                CollectionPanelLogReasonCode.NativePreviewRuntimeFailed,
+            _ => CollectionPanelLogReasonCode.NativePreviewUnavailable,
+        };
+}

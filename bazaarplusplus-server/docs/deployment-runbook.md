@@ -1,0 +1,225 @@
+# BazaarPlusPlus Server V6 deployment runbook
+
+The deployment is Worker `bazaarplusplus-mod-api-v6` at `mod-api-v6.bazaarplusplus.com`, D1 `bazaarplusplus-mod-api-v6-db` built from `migrations-v6/`, and R2 bucket `bazaarplusplus-bundle-v6`. Mod 6.0 and later upload to it (`ModApiUploadDefaults.ApiBaseUrl`).
+
+These commands create or mutate Cloudflare resources. Run them only with production deployment authorization, from `bazaarplusplus-server/`, using an authenticated Wrangler profile for the account in `wrangler.toml` (`R2_ACCOUNT_ID`). Sections 1–5 are the first deployment, in order.
+
+## 1. Validate the local artifact
+
+```sh
+npm ci
+npm run check
+npm test
+npx wrangler deploy --dry-run
+git diff --check
+```
+
+## 2. Create isolated storage
+
+```sh
+npx wrangler d1 create bazaarplusplus-mod-api-v6-db --location apac
+npx wrangler r2 bucket create bazaarplusplus-bundle-v6 --location apac
+```
+
+`wrangler.toml` holds the `database_id` that `d1 create` printed; if the database is ever recreated, commit the new UUID before deploying. Never point this file at any other database.
+
+Set the bucket lifecycle:
+
+```sh
+npx wrangler r2 bucket lifecycle add bazaarplusplus-bundle-v6 v6-bundle-retention bundles/ --expire-days 8
+npx wrangler r2 bucket lifecycle list bazaarplusplus-bundle-v6
+```
+
+The listing must show the `bundles/` prefix expiring after 8 days. The Worker never deletes R2 objects; this rule is the only R2 retention.
+
+Create an R2 S3 API credential scoped to `bazaarplusplus-bundle-v6` with Object Read permission only. Do not grant write, delete, or access to another bucket, and do not reuse a credential scoped to another bucket.
+
+## 3. Configure rate limiting and secrets
+
+`[[ratelimits]].namespace_id` must be a positive integer unique in the account. V6 uses `1002`; `1001` is already taken in the account, and sharing an ID would merge two Workers' Ghost counters. Keep the threshold at 60 calls per 60 seconds.
+
+Generate two independent service tokens for V6. They must differ from each other and from every other token:
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+```
+
+Each output must be 43 characters. The secrets are written in section 4 after the first deploy creates the Worker. Locally, the V6 R2 Access Key ID goes in the shared configuration that `.dev.vars` is copied from ([development guide](../../docs/development.md)) as `R2_PRESIGN_ACCESS_KEY_ID`. Do not commit any value.
+
+## 4. Apply migrations, deploy, and set secrets
+
+```sh
+npx wrangler d1 migrations apply bazaarplusplus-mod-api-v6-db --remote
+npx wrangler d1 migrations list bazaarplusplus-mod-api-v6-db --remote
+npx wrangler deploy
+```
+
+The list must show `0001_v6_baseline.sql` applied and nothing pending. From here `migrations-v6/0001_v6_baseline.sql` is frozen; every schema change is a new numbered file, and a recorded migration is never reapplied.
+
+`wrangler deploy` attaches the custom domain from `[[routes]]` (`custom_domain = true`). The `bazaarplusplus.com` zone must be on this account and `mod-api-v6` must have no existing DNS record; otherwise the deploy fails and names the conflict.
+
+Set the four secrets on the new Worker without putting them in shell history or repository files:
+
+```sh
+npx wrangler secret put R2_PRESIGN_ACCESS_KEY_ID
+npx wrangler secret put R2_PRESIGN_SECRET_ACCESS_KEY
+npx wrangler secret put BUNDLE_SYNC_TOKEN
+npx wrangler secret put BAZAARDB_DELIVERY_TOKEN
+```
+
+Until they are set, signing and protected routes fail closed (`500 internal_error` or `503 storage_unavailable`). No released mod points at V6 before 6.0.0, so this window has no player traffic.
+
+Verify the custom domain resolves only to `bazaarplusplus-mod-api-v6` and that the Worker has both Cron Triggers from `wrangler.toml`. `*/15 * * * *` runs D1 retention; `23 * * * *` runs the analyzer dispatch (section 8). Allow up to 15 minutes for trigger configuration to propagate.
+
+Then hand the V6 base URL and tokens to their consumers: the analyzer's repository `.env` (`BPP_API_BASE_URL` and `BPP_BUNDLE_SYNC_TOKEN`), and BazaarDB, which reads `GET /bazaardb/bundles` with the V6 delivery token ([API reference](api-reference.md#get-bazaardbbundles)), with notice before 6.0.0 ships.
+
+## 5. Production smoke test
+
+Run this before 6.0.0 is promoted. Use a generated Bundle from the checked-in V6 contract implementation, not a production player's data.
+
+1. `GET /health` returns `200`, a request ID, and a safe-integer server time.
+2. Upload a Run-only Bundle with `POST /bundles`; expect `201 stored` and `not_applicable`.
+3. Repeat identical bytes; expect `200 duplicate`.
+4. Upload a Bundle with another Bundle version; expect it to be rejected without storage.
+5. Upload a Screenshot-bearing Bundle; expect `201 stored` and `created`.
+6. After the 60-second settle lag, list both with the Bundle Sync token. Confirm keyset ordering, `X-Amz-Expires=604800`, and the `bazaarplusplus-bundle-v6` host.
+7. Download one URL twice with `GET`; both responses must equal the uploaded bytes.
+8. Change the URL object key, use `HEAD`, change `X-Amz-Expires`, and change one signature character. R2 must reject every modified request.
+9. Query a seeded eligible Ghost account. Confirm the five-day projection and direct R2 Bundle download.
+10. Exceed the Ghost limit from a controlled test address. Confirm `429`, `Retry-After: 60`, and no D1/presign activity in route logs.
+11. List the same window from `GET /bazaardb/bundles` with the BazaarDB token. Only the Screenshot-bearing Bundle appears, with its `run_id` and `sha256`; download it once and compare the digest.
+12. Inject a D1 commit failure after a valid R2 PUT, then repeat the original `POST /bundles` and confirm the idempotent retry commits the R2-only object while preserving its R2 upload time.
+13. Confirm logs contain no service token, R2 secret, Bundle body, projection JSON, Screenshot bytes, or complete presigned URL.
+
+### Known consequences of a new deployment
+
+- **Empty Ghost pool.** Ghost discovery reads only this D1, which starts empty, and `bundle_uploaders` starts empty. 6.0 players see few Ghost Battles until about five days of 6.0 uploads accumulate.
+- **BazaarDB moves.** BazaarDB must page `GET /bazaardb/bundles` on `mod-api-v6.bazaarplusplus.com` with the V6 delivery token, keep its own cursor, and decode Bundle V6. Screenshot-bearing Bundles from 6.0 players are delivered only through V6.
+
+## 6. Post-deploy checks
+
+### 6.1 Log-based alerts (Workers Observability)
+
+The Worker emits one structured JSON line per alertable condition, so each alert is a
+Workers Observability query on the `bazaarplusplus-mod-api-v6` Worker (dashboard:
+Compute → Workers → Observability → create a query, then attach an alert with a
+notification destination).
+Suggested starting thresholds; tune against real traffic.
+
+| Alert | Query filter | Suggested threshold |
+| --- | --- | --- |
+| Server 5xx (storage, presign, unclassified) | `event = "worker.http_error" OR event = "worker.internal_error"` | > 5 in 5 min |
+| Presign / storage failure specifically | `event = "worker.http_error" AND code = "storage_unavailable"` | > 5 in 5 min |
+| Service token misconfiguration | `event = "worker.http_error" AND code = "invalid_configuration"` | ≥ 1 in 5 min |
+| Ingest identity conflicts | invocation logs: request path `/bundles`, method POST, response status 409 | > 10 in 15 min |
+| Ghost 429 rate | `event = "ghost.discovery" AND limited = true` | > 100 in 5 min |
+| Ingest orphan objects | `event = "bundle.ingest.orphan" OR event = "bundle.orphan.invalid"` | ≥ 1 in 15 min |
+| D1 cleanup failure | `event = "d1.retention.failed"` | ≥ 1 in 15 min |
+| D1 cleanup backlog | `event = "d1.retention" AND has_more = true` | Four consecutive runs |
+| D1 cleanup stopped | No successful `d1.retention` event / failed Cron invocations | No success for 45 min |
+| Analyzer dispatch failure | `event = "analyzer.dispatch.failed"` (configured as `message LIKE '%analyzer.dispatch.failed%'`, see below) | ≥ 3 in 3 h |
+
+Classified 4xx responses are intentionally not logged; they are client errors and
+would drown the signal.
+
+The Analyzer dispatch failure alert is configured as a Cloudflare custom alert
+(Notifications → Create an alert → Custom alert), named `Analyzer dispatch failure`,
+using the Threshold method with email delivery. The custom alert query builder for the
+Workers Logs dataset filters only on fixed columns, so it cannot match the `event`
+field directly. The alert instead matches the whole JSON log line in the `message`
+column, which the Worker's `writeLog` in `src/observability.ts` emits:
+
+```sql
+SELECT count() AS "value"
+FROM "logs"."workersLogs"
+WHERE "scriptName" = 'bazaarplusplus-mod-api-v6'
+  AND "message" LIKE '%analyzer.dispatch.failed%'
+```
+
+The dashboard also adds an `accountTag` predicate. The rule fires at `>= 3` with a
+custom `3h` evaluation window and repeats at most once per hour while it stays
+active. Renaming the event breaks this alert silently, so update the `LIKE` pattern
+in the same change.
+
+### 6.2 D1 state checks (external prober)
+
+The oldest retained Bundle can be inspected with this read-only probe from an operator
+shell or external monitoring service. The retention Cron reports deletion progress and
+remaining backlog through `d1.retention` logs. Use a Cloudflare API token scoped to D1
+read for this probe:
+
+```sh
+npx wrangler d1 execute bazaarplusplus-mod-api-v6-db --remote --json --command "SELECT stored_at_ms AS oldest_stored_at_ms FROM bundles INDEXED BY idx_bundles_stored_retention ORDER BY stored_at_ms, bundle_id LIMIT 1"
+```
+
+Alert when `oldest_stored_at_ms` remains older than 15 days plus one hour. The server
+cannot see BazaarDB's progress; BazaarDB monitors its own cursor lag against the
+8-day window. Monitor D1 database size in Cloudflare D1
+Metrics and alert at 80% of the database's configured storage limit. Retention limits
+the history window; it does not cap the volume uploaded within those 15 days or the
+deployment-lifetime `bundle_uploaders` table.
+
+### 6.3 Ecosystem gates
+
+- Verify the analyzer and BazaarDB clients compare the decoded Run identity/version with the Bundle manifest and quarantine mismatches.
+
+## 7. D1 retention
+
+The Worker automatically prunes Bundle metadata after 15 days measured from
+`bundles.stored_at_ms`, the server-observed R2 storage time. It uses the scheduled
+invocation time as a fixed cutoff and deletes only rows strictly older than that
+cutoff. Client creation times do not change the clock.
+
+Each invocation commits up to ten independent transactions of at most 100 parent
+Bundles each, oldest first. A Bundle delete cascades to its Ghost projections.
+`bundle_uploaders` is deployment-lifetime
+trust state and is never deleted. The handler requires only D1, without R2 credentials
+or service tokens, and makes no R2 calls. The R2 bucket keeps its separate 8-day rule.
+
+Preview the first eligible page:
+
+```sh
+npx wrangler d1 execute bazaarplusplus-mod-api-v6-db --remote --json --command "SELECT bundle_id, stored_at_ms FROM bundles INDEXED BY idx_bundles_stored_retention WHERE stored_at_ms < (unixepoch() - 15 * 86400) * 1000 ORDER BY stored_at_ms, bundle_id LIMIT 100"
+```
+
+`npm test` covers the exact cutoff, cascades, interruption recovery, and bounded reads.
+A local scheduled invocation can be exercised through Wrangler's
+`/cdn-cgi/local/scheduled` endpoint; it is not a public application route.
+
+A successful run logs `deleted_bundles` (parent count) and `has_more`. The configured
+budget supports up to 96,000 parent deletions per day when every trigger succeeds;
+large initial backlogs can take multiple runs. An error fails the scheduled invocation
+and emits `d1.retention.failed`; earlier committed batches remain deleted and the next
+invocation continues from the remaining rows. Retries and overlapping invocations
+are safe because each bounded selection and delete is one SQL statement.
+
+Use the backlog, missing-run, and storage alerts above to detect capacity pressure.
+Increase the schedule frequency or per-invocation batch count only after measuring
+delete duration and API latency. Keep each delete transaction small. To pause pruning,
+deploy `crons = []` in the managed Wrangler configuration; already deleted metadata
+requires recovery from an available D1 backup rather than a Worker rollback.
+
+## 8. Analyzer dispatch
+
+GitHub drops most `schedule` events for `.github/workflows/analyzer.yml`, so the
+`23 * * * *` Cron Trigger starts the analyzer instead: it calls GitHub's
+`workflow_dispatch` API for that workflow on `master` with `publish` enabled. It
+runs once per hour because only that cron string selects it; the `*/15` trigger
+never dispatches. The workflow's concurrency group queues at most one run behind
+a running one, and its own sparse `schedule` stays as a fallback.
+
+The token is a fine-grained GitHub personal access token with access to
+`BazaarPlusPlus/BazaarPlusPlus` only and the repository permission Actions: Read
+and write (Metadata: Read is added automatically). Set it like the other secrets:
+
+```sh
+npx wrangler secret put GITHUB_ANALYZER_DISPATCH_TOKEN
+```
+
+Without it each dispatch logs `analyzer.dispatch.skipped`. A GitHub error or
+timeout logs `analyzer.dispatch.failed` with the HTTP status and does not fail
+the invocation; the analyzer backfills missed hours on its next run. A `401`
+means the token expired or was revoked: create a new one and put it again.
+Success logs `analyzer.dispatch` with status `204`, and the run appears in the
+repository's Actions tab as a `workflow_dispatch` event.

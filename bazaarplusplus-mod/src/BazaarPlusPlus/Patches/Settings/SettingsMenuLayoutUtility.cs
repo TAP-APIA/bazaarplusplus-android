@@ -1,0 +1,245 @@
+#pragma warning disable CS0436
+#nullable enable
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using BazaarPlusPlus.Game.Settings;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace BazaarPlusPlus.Patches.Settings;
+
+internal static class SettingsMenuLayoutUtility
+{
+    private const float FallbackSpacing = 8f;
+    private static readonly ConditionalWeakTable<Transform, LayoutSnapshot> LastLayouts = new();
+
+    internal static void Rebuild(RectTransform rectTransform)
+    {
+        var current = rectTransform;
+        while (current != null)
+        {
+            LayoutRebuilder.ForceRebuildLayoutImmediate(current);
+            current = current.parent.AsRectTransform();
+        }
+    }
+
+    internal static void ArrangeRow(
+        Transform anchorRow,
+        Transform cloneRow,
+        SettingsRowId rowId,
+        bool emitObservation
+    )
+    {
+        if (anchorRow == null || cloneRow == null)
+            return;
+
+        cloneRow.SetSiblingIndex(anchorRow.GetSiblingIndex() + 1);
+
+        var parentRect = anchorRow.parent.AsRectTransform();
+        if (parentRect == null)
+            return;
+
+        if (HasAutomaticLayout(parentRect))
+        {
+            Rebuild(parentRect);
+            if (emitObservation)
+            {
+                var automaticRect = cloneRow.AsRectTransform();
+                ReportLayout(
+                    cloneRow,
+                    SettingsRowLayoutMode.Automatic,
+                    rowId,
+                    GetAdditionalRowIndex(parentRect, anchorRow, cloneRow) + 1,
+                    0f,
+                    automaticRect?.anchoredPosition.x ?? 0f,
+                    automaticRect?.anchoredPosition.y ?? 0f
+                );
+            }
+            return;
+        }
+
+        var anchorRect = anchorRow.AsRectTransform();
+        var cloneRect = cloneRow.AsRectTransform();
+        if (anchorRect == null || cloneRect == null)
+        {
+            Rebuild(parentRect);
+            return;
+        }
+
+        var additionalIndex = GetAdditionalRowIndex(parentRect, anchorRow, cloneRow);
+
+        var step = GetVerticalStep(anchorRect, cloneRect);
+        cloneRect.anchorMin = anchorRect.anchorMin;
+        cloneRect.anchorMax = anchorRect.anchorMax;
+        cloneRect.pivot = anchorRect.pivot;
+        cloneRect.sizeDelta = anchorRect.sizeDelta;
+        cloneRect.anchoredPosition =
+            anchorRect.anchoredPosition + new Vector2(0f, -step * (additionalIndex + 1));
+        cloneRect.localScale = anchorRect.localScale;
+        cloneRect.localRotation = anchorRect.localRotation;
+
+        if (emitObservation)
+        {
+            ReportLayout(
+                cloneRow,
+                SettingsRowLayoutMode.Manual,
+                rowId,
+                additionalIndex + 1,
+                step,
+                cloneRect.anchoredPosition.x,
+                cloneRect.anchoredPosition.y
+            );
+        }
+        ExpandParentIfNeeded(parentRect, anchorRect, step, additionalIndex + 1);
+    }
+
+    [Conditional("DEBUG")]
+    private static void ReportLayout(
+        Transform cloneRow,
+        SettingsRowLayoutMode mode,
+        SettingsRowId rowId,
+        int additionalIndex,
+        float step,
+        float positionX,
+        float positionY
+    )
+    {
+        var snapshot = LastLayouts.GetOrCreateValue(cloneRow);
+        if (snapshot.Matches(mode, rowId, additionalIndex, step, positionX, positionY))
+            return;
+        snapshot.Set(mode, rowId, additionalIndex, step, positionX, positionY);
+        BppLog.DebugEvent(
+            new BppLogEvent(BppLogFeatureScope.Settings, "settings.row.layout_applied"),
+            () =>
+                [
+                    ("layout_mode", mode),
+                    ("row_id", rowId),
+                    ("additional_index", additionalIndex),
+                    ("step_px", step),
+                    ("position_x_px", positionX),
+                    ("position_y_px", positionY),
+                ]
+        );
+    }
+
+    private sealed class LayoutSnapshot
+    {
+        private bool _initialized;
+        private SettingsRowLayoutMode _mode;
+        private SettingsRowId _rowId;
+        private int _additionalIndex;
+        private float _step;
+        private float _positionX;
+        private float _positionY;
+
+        internal bool Matches(
+            SettingsRowLayoutMode mode,
+            SettingsRowId rowId,
+            int additionalIndex,
+            float step,
+            float positionX,
+            float positionY
+        ) =>
+            _initialized
+            && _mode == mode
+            && _rowId == rowId
+            && _additionalIndex == additionalIndex
+            && Math.Abs(_step - step) < 0.01f
+            && Math.Abs(_positionX - positionX) < 0.01f
+            && Math.Abs(_positionY - positionY) < 0.01f;
+
+        internal void Set(
+            SettingsRowLayoutMode mode,
+            SettingsRowId rowId,
+            int additionalIndex,
+            float step,
+            float positionX,
+            float positionY
+        )
+        {
+            _initialized = true;
+            _mode = mode;
+            _rowId = rowId;
+            _additionalIndex = additionalIndex;
+            _step = step;
+            _positionX = positionX;
+            _positionY = positionY;
+        }
+    }
+
+    private static bool HasAutomaticLayout(RectTransform rectTransform)
+    {
+        return rectTransform.GetComponent<VerticalLayoutGroup>() != null
+            || rectTransform.GetComponent<HorizontalOrVerticalLayoutGroup>() != null
+            || rectTransform.GetComponent<GridLayoutGroup>() != null;
+    }
+
+    private static int GetAdditionalRowIndex(
+        RectTransform parentRect,
+        Transform anchorRow,
+        Transform cloneRow
+    )
+    {
+        var index = 0;
+        for (var childIndex = 0; childIndex < parentRect.childCount; childIndex++)
+        {
+            var child = parentRect.GetChild(childIndex);
+            if (child == null || child == anchorRow || !child.name.StartsWith("BPP_"))
+                continue;
+
+            if (child == cloneRow)
+                return index;
+
+            index++;
+        }
+
+        return 0;
+    }
+
+    private static float GetVerticalStep(RectTransform anchorRect, RectTransform cloneRect)
+    {
+        var preferredHeight = LayoutUtility.GetPreferredHeight(anchorRect);
+        if (preferredHeight <= 0f)
+            preferredHeight = anchorRect.rect.height;
+        if (preferredHeight <= 0f)
+        {
+            preferredHeight = LayoutUtility.GetPreferredHeight(cloneRect);
+            if (preferredHeight <= 0f)
+                preferredHeight = cloneRect.rect.height;
+        }
+
+        if (preferredHeight <= 0f)
+            preferredHeight = FallbackSpacing;
+
+        var spacing = GetSpacing(anchorRect);
+        return preferredHeight + spacing;
+    }
+
+    private static float GetSpacing(RectTransform anchorRect)
+    {
+        var layoutElement = anchorRect.GetComponent<LayoutElement>();
+        if (layoutElement != null && layoutElement.minHeight > 0f)
+            return Math.Max(layoutElement.minHeight - anchorRect.rect.height, 0f);
+
+        return FallbackSpacing;
+    }
+
+    private static void ExpandParentIfNeeded(
+        RectTransform parentRect,
+        RectTransform anchorRect,
+        float step,
+        int additionalRows
+    )
+    {
+        var bottomY =
+            anchorRect.anchoredPosition.y - step * additionalRows - anchorRect.rect.height;
+        var requiredHeight = Math.Abs(Math.Min(0f, bottomY)) + anchorRect.rect.height;
+        if (requiredHeight <= parentRect.rect.height)
+            return;
+
+        parentRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, requiredHeight);
+        Rebuild(parentRect);
+    }
+}

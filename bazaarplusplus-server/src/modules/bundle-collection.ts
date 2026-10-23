@@ -1,0 +1,235 @@
+import { validBundleId } from "../bundle/manifest";
+import { BUNDLE_CONTENT_TYPE } from "../bundle/prefix";
+import type { Env } from "../env";
+import { apiError } from "../errors";
+import { oneQueryValue } from "../http/request";
+import {
+  SYNC_DEFAULT_LIMIT,
+  SYNC_MAX_LIMIT,
+  SYNC_MAX_LOOKBACK_MS,
+  SYNC_SETTLE_LAG_MS,
+} from "../limits";
+import { logEvent } from "../observability";
+import {
+  createBundleDownloadSigner,
+  type SignedBundleDownload,
+  signDownloadPage,
+} from "../presigner";
+
+interface BundleCollectionItem {
+  bundle_id: string;
+  available_at_ms: number;
+  download_url: string;
+  download_expires_at_ms: number;
+}
+
+interface BazaarDbBundleItem extends BundleCollectionItem {
+  run_id: string;
+  content_type: typeof BUNDLE_CONTENT_TYPE;
+  sha256: string;
+}
+
+export interface CollectionPage<Item> {
+  window: { available_from_ms: number; available_before_ms: number };
+  items: Item[];
+  next_after: { available_at_ms: number; bundle_id: string } | null;
+}
+
+interface CollectionRow {
+  bundle_id: string;
+  available_at_ms: number;
+  object_key: string;
+}
+
+interface BazaarDbRow extends CollectionRow {
+  run_id: string;
+  bundle_sha256: string;
+}
+
+// One keyset feed over bundles: the index and filter must agree, because a
+// partial index is usable only when the query repeats its WHERE clause.
+interface CollectionFeed<Row extends CollectionRow, Item> {
+  event: string;
+  columns: string;
+  index: string;
+  filter: string;
+  item(row: Row, download: SignedBundleDownload): Item;
+}
+
+function baseItem(row: CollectionRow, download: SignedBundleDownload): BundleCollectionItem {
+  return {
+    bundle_id: row.bundle_id,
+    available_at_ms: row.available_at_ms,
+    download_url: download.url,
+    download_expires_at_ms: download.expiresAtMs,
+  };
+}
+
+const ALL_BUNDLES: CollectionFeed<CollectionRow, BundleCollectionItem> = {
+  event: "bundle.collection",
+  columns: "bundle_id, available_at_ms, object_key",
+  index: "idx_bundles_available",
+  filter: "",
+  item: baseItem,
+};
+
+const SCREENSHOT_BUNDLES: CollectionFeed<BazaarDbRow, BazaarDbBundleItem> = {
+  event: "bazaardb.collection",
+  columns: "bundle_id, available_at_ms, object_key, run_id, bundle_sha256",
+  index: "idx_bundles_screenshot_available",
+  filter: " AND has_screenshot = 1",
+  item: (row, download) => ({
+    ...baseItem(row, download),
+    run_id: row.run_id,
+    content_type: BUNDLE_CONTENT_TYPE,
+    sha256: row.bundle_sha256,
+  }),
+};
+
+function integer(value: string | null, field: string): number {
+  if (value === null || !/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw apiError("invalid_query", `${field} must be a non-negative safe integer`, {
+      details: {
+        field,
+      },
+    });
+  }
+  const result = Number(value);
+  if (!Number.isSafeInteger(result)) {
+    throw apiError("invalid_query", `${field} must be a non-negative safe integer`, {
+      details: {
+        field,
+      },
+    });
+  }
+  return result;
+}
+
+export function collectBundles(
+  request: Request,
+  env: Env,
+  requestId: string,
+): Promise<CollectionPage<BundleCollectionItem>> {
+  return collectPage(request, env, requestId, ALL_BUNDLES);
+}
+
+export function collectBazaarDbBundles(
+  request: Request,
+  env: Env,
+  requestId: string,
+): Promise<CollectionPage<BazaarDbBundleItem>> {
+  return collectPage(request, env, requestId, SCREENSHOT_BUNDLES);
+}
+
+async function collectPage<Row extends CollectionRow, Item>(
+  request: Request,
+  env: Env,
+  requestId: string,
+  feed: CollectionFeed<Row, Item>,
+): Promise<CollectionPage<Item>> {
+  const url = new URL(request.url);
+  const allowed = new Set([
+    "available_from_ms",
+    "available_before_ms",
+    "limit",
+    "after_available_at_ms",
+    "after_bundle_id",
+  ]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key)) {
+      throw apiError("invalid_query", `Unknown query parameter: ${key}`, {
+        details: {
+          field: key,
+        },
+      });
+    }
+  }
+
+  const now = Date.now();
+  const settlePoint = now - SYNC_SETTLE_LAG_MS;
+  const from = integer(
+    oneQueryValue(url.searchParams, "available_from_ms", true),
+    "available_from_ms",
+  );
+  if (from < now - SYNC_MAX_LOOKBACK_MS) {
+    throw apiError("window_expired", "Bundle window is outside R2 retention");
+  }
+  const beforeValue = oneQueryValue(url.searchParams, "available_before_ms", false);
+  const before = beforeValue === null ? settlePoint : integer(beforeValue, "available_before_ms");
+  if (before > settlePoint) {
+    throw apiError("window_not_settled", "Bundle window end is not settled");
+  }
+  if (from >= before) {
+    throw apiError("invalid_query", "available_from_ms must be before available_before_ms");
+  }
+
+  const limitValue = oneQueryValue(url.searchParams, "limit", false);
+  const limit = limitValue === null ? SYNC_DEFAULT_LIMIT : integer(limitValue, "limit");
+  if (limit < 1 || limit > SYNC_MAX_LIMIT) {
+    throw apiError("invalid_query", "limit must be between 1 and 500", {
+      details: {
+        field: "limit",
+      },
+    });
+  }
+  const afterTimeValue = oneQueryValue(url.searchParams, "after_available_at_ms", false);
+  const afterId = oneQueryValue(url.searchParams, "after_bundle_id", false);
+  if ((afterTimeValue === null) !== (afterId === null)) {
+    throw apiError("invalid_query", "Both keyset position fields are required");
+  }
+  const afterTime =
+    afterTimeValue === null ? null : integer(afterTimeValue, "after_available_at_ms");
+  if (
+    afterTime !== null &&
+    (afterTime < from || afterTime >= before || afterId === null || !validBundleId(afterId))
+  ) {
+    throw apiError("invalid_query", "Keyset position is outside the fixed window");
+  }
+
+  let rows: Row[];
+  try {
+    const lowerBound =
+      afterTime === null ? "available_at_ms >= ?1" : "(available_at_ms, bundle_id) > (?1, ?4)";
+    const result = await env.DB.prepare(
+      `SELECT ${feed.columns}
+       FROM bundles INDEXED BY ${feed.index}
+       WHERE ${lowerBound} AND available_at_ms < ?2${feed.filter}
+       ORDER BY available_at_ms ASC, bundle_id ASC
+       LIMIT ?3`,
+    );
+    const page =
+      afterTime === null
+        ? result.bind(from, before, limit + 1)
+        : result.bind(afterTime, before, limit + 1, afterId);
+    const found = await page.all<Row>();
+    rows = found.results;
+  } catch {
+    throw apiError("storage_unavailable", "Bundle index query failed");
+  }
+
+  const hasNext = rows.length > limit;
+  const returned = rows.slice(0, limit);
+  const downloads = await signDownloadPage(
+    createBundleDownloadSigner(env),
+    returned.map((row) => row.object_key),
+    now,
+    "Bundle URL signing failed",
+  );
+  const items = returned.map((row, index) => feed.item(row, downloads[index]));
+  const last = returned.at(-1);
+  logEvent(feed.event, {
+    request_id: requestId,
+    available_from_ms: from,
+    available_before_ms: before,
+    row_count: returned.length,
+    has_next: hasNext,
+  });
+  return {
+    window: { available_from_ms: from, available_before_ms: before },
+    items,
+    next_after:
+      hasNext && last !== undefined
+        ? { available_at_ms: last.available_at_ms, bundle_id: last.bundle_id }
+        : null,
+  };
+}

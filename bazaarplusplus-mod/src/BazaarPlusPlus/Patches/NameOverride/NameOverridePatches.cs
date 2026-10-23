@@ -1,0 +1,152 @@
+#pragma warning disable CS0436
+#nullable enable
+using System.Reflection;
+using BazaarPlusPlus.GameInterop;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using HarmonyLib;
+using TheBazaar;
+
+namespace BazaarPlusPlus.Patches.NameOverride;
+
+internal static class NameOverrideHelper
+{
+    private const string ReplacementName = "Anonymous";
+
+    public static bool IsEnabled()
+    {
+        return BppPatchHost.Services.Config.EnableNameOverrideConfig.Value;
+    }
+
+    public static bool TryGetDisplayNameOverride(string originalName, out string? replacementName)
+    {
+        replacementName = null;
+
+        if (!IsEnabled())
+            return false;
+
+        replacementName = ReplacementName;
+        return !string.Equals(originalName, replacementName, StringComparison.Ordinal);
+    }
+
+    public static bool TryGetReplacementName(string originalName, out string? replacementName)
+    {
+        replacementName = null;
+
+        if (!IsEnabled())
+            return false;
+
+        var profileName = BppClientCacheBridge.TryGetProfileUsername();
+        if (string.IsNullOrEmpty(profileName))
+        {
+            BppLog.DebugEvent(
+                new BppLogEvent(BppLogFeatureScope.NameOverride, "name_override.value.skipped"),
+                () =>
+                    [
+                        ("operation", NameOverrideOperation.ResolveProfile),
+                        ("reason_code", NameOverrideReasonCode.ProfileUnavailable),
+                    ]
+            );
+            return false;
+        }
+
+        if (!string.Equals(originalName, profileName, StringComparison.Ordinal))
+            return false;
+
+        replacementName = ReplacementName;
+        return true;
+    }
+}
+
+[HarmonyPatch]
+public static class PlayerProfileGetDisplayUsernamePatch
+{
+    private static MethodBase? TargetMethod()
+    {
+        var playerProfileType = AccessTools.TypeByName("TheBazaar.PlayerProfile");
+        return playerProfileType == null
+            ? null
+            : AccessTools.Method(playerProfileType, "GetDisplayUsername");
+    }
+
+    [HarmonyPostfix]
+    private static void Postfix(ref string __result)
+    {
+        if (!NameOverrideHelper.TryGetDisplayNameOverride(__result, out var replacementName))
+            return;
+
+        __result = replacementName!;
+        BppLog.DebugEvent(
+            new BppLogEvent(BppLogFeatureScope.NameOverride, "name_override.value.applied"),
+            () =>
+                [
+                    ("operation", NameOverrideOperation.DisplayUsername),
+                    ("reason_code", NameOverrideReasonCode.Replaced),
+                ]
+        );
+    }
+}
+
+[HarmonyPatch(
+    typeof(HeroBannerController),
+    "UpdatePlayer",
+    new[]
+    {
+        typeof(string),
+        typeof(int),
+        typeof(string),
+        typeof(TheBazaar.ProfileData.ISeasonRank),
+#if BPP_ANDROID
+        typeof(Il2CppSystem.Nullable<int>),
+#else
+        typeof(int?),
+#endif
+    }
+)]
+public static class UpdatePlayerPatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(
+        ref string userName,
+        ref int nameId
+    )
+    {
+        if (!NameOverrideHelper.TryGetReplacementName(userName, out var replacementName))
+            return true;
+
+        userName = replacementName!;
+        nameId = 0;
+        BppLog.DebugEvent(
+            new BppLogEvent(BppLogFeatureScope.NameOverride, "name_override.value.applied"),
+            () =>
+                [
+                    ("operation", NameOverrideOperation.UpdatePlayer),
+                    ("reason_code", NameOverrideReasonCode.Replaced),
+                ]
+        );
+        return true;
+    }
+}
+
+[HarmonyPatch(typeof(HeroBannerController), "SetHeroName")]
+public static class SetHeroNamePatch
+{
+    [HarmonyPrefix]
+    private static bool Prefix(ref string newName, ref int usernameId)
+    {
+        if (!NameOverrideHelper.TryGetReplacementName(newName, out var replacementName))
+            return true;
+
+        newName = replacementName!;
+        usernameId = 0;
+        BppLog.DebugEvent(
+            new BppLogEvent(BppLogFeatureScope.NameOverride, "name_override.value.applied"),
+            () =>
+                [
+                    ("operation", NameOverrideOperation.SetHeroName),
+                    ("reason_code", NameOverrideReasonCode.Replaced),
+                ]
+        );
+        return true;
+    }
+}

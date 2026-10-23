@@ -1,0 +1,16 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("CollectionEncounterTooltip.Tests")]
+[assembly: InternalsVisibleTo("ItemEnchantPreview.Tests")]
+[assembly: InternalsVisibleTo("CollectionSourceFiltering.Tests")]
+[assembly: InternalsVisibleTo("LiveBuildRecommendations.Tests")]
+[assembly: InternalsVisibleTo("RunLoggingPipeline.Tests")]
+[assembly: InternalsVisibleTo("EndOfRunScreenshotGate.Tests")]
+[assembly: InternalsVisibleTo("HistoryPanelFactory.Tests")]
+[assembly: InternalsVisibleTo("HistoryPanelDecisions.Tests")]
+[assembly: InternalsVisibleTo("BundlePipeline.Tests")]
+[assembly: InternalsVisibleTo("CombatReplayRecording.Tests")]
+[assembly: InternalsVisibleTo("GhostBattleSync.Tests")]
+[assembly: InternalsVisibleTo("HistoryPanelRepository.Tests")]
+[assembly: InternalsVisibleTo("SupporterCatalogModule.Tests")]
+[assembly: InternalsVisibleTo("RuntimeIntegration.Tests")]

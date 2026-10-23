@@ -1,0 +1,156 @@
+#nullable enable
+using System.Reflection;
+using BazaarGameShared.Domain.Cards;
+using BazaarGameShared.Domain.Game;
+using BazaarPlusPlus.Infrastructure;
+using BazaarPlusPlus.Infrastructure.Logging;
+using TheBazaar;
+using TheBazaar.DataManagement.Json;
+
+namespace BazaarPlusPlus.GameInterop.StaticCards;
+
+/// <summary>
+/// <c>Data.GetStatic()</c> has shipped as both a synchronous manager return and a completed
+/// task-returning accessor. This helper centralises that version seam.
+/// </summary>
+internal static class BppStaticDataAccess
+{
+    private static readonly FieldInfo? DatabasePathField = typeof(JsonGameDataManager).GetField(
+        "_dbPath",
+        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+    );
+    private static readonly FieldInfo? LevelUpsField = typeof(JsonGameDataManager).GetField(
+        "_levelUps",
+        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+    );
+
+    public static TCardBase? GetCardTemplate(object? staticData, Guid templateId)
+    {
+        if (staticData is not JsonGameDataManager manager || templateId == Guid.Empty)
+            return null;
+
+        return manager.GetCardById(templateId.ToNativeGuid()).TryCast<TCardBase>();
+    }
+
+    /// <summary>
+    /// Non-blocking handle to the static data manager. Returns the manager as an opaque object
+    /// only when it is fully materialised (created, and any task-returning <c>GetStatic()</c>
+    /// already completed); returns <c>null</c> otherwise. Never blocks the main thread waiting
+    /// on the static-data task.
+    /// </summary>
+    public static object? TryGetReadyManagerObject()
+    {
+        if (!Data.IsManagerCreated())
+            return null;
+
+        object? staticData = Data.GetStatic();
+        if (staticData is Task<JsonGameDataManager> task)
+            return task.IsCompleted ? task.Result : null;
+
+        return staticData as JsonGameDataManager;
+    }
+
+    /// <summary>
+    /// Materialises the full card map (<c>JsonGameDataManager.GetCardMap()</c> → <c>ReadAllCards</c>:
+    /// a full-table SQLite read plus polymorphic JSON deserialize — the dominant first-open cost).
+    /// Intended to run on a worker thread: the game opens its own SQLite connection, deserializes
+    /// on PLINQ workers, builds a fresh dictionary, and publishes it via an atomic reference
+    /// assignment, so calling it off the main thread does not tear the shared map. <paramref
+    /// name="source"/> must come from <see cref="TryGetReadyManagerObject"/>. When downloaded data
+    /// contains unsupported derived types, returns a compatible snapshot without publishing it
+    /// to the game's cache. Other data errors propagate.
+    /// </summary>
+    public static Dictionary<Guid, ITCard>? LoadCardMap(object? source)
+    {
+        if (source is not JsonGameDataManager manager)
+            return null;
+        try
+        {
+            return manager.GetCardMap().ToManagedGuidDictionary();
+        }
+        catch (Exception error) when (CompatibleCardMapReader.IsUnsupportedType(error))
+        {
+            var path = DatabasePathField?.GetValue(manager) as string;
+            if (string.IsNullOrWhiteSpace(path))
+                throw;
+
+            var cards = CompatibleCardMapReader.Read(path!, out var unsupportedCount);
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.StaticCards,
+                    "static_cards.catalog.unsupported_templates"
+                ),
+                ("accepted_count", cards.Count),
+                ("unsupported_count", unsupportedCount)
+            );
+            return cards;
+        }
+    }
+
+    /// <summary>
+    /// Copies the manager's eagerly-loaded level-up table so background preview compilation never
+    /// retains the game's mutable dictionary. Reflection is centralised here because the manager
+    /// exposes only point lookups and the level range is data-driven.
+    /// </summary>
+    public static Dictionary<int, TLevelUp>? SnapshotLevelUps(object? source)
+    {
+        if (source is not JsonGameDataManager manager)
+            return null;
+        if (LevelUpsField?.GetValue(manager) is not Dictionary<int, TLevelUp> levelUps)
+            return null;
+        return new Dictionary<int, TLevelUp>(levelUps);
+    }
+
+    /// <summary>
+    /// Captures the ordinary string inputs needed to identify the current GameData generation.
+    /// Call this on the Unity main thread: the fallback path and data URL touch game globals;
+    /// workers consume only the returned strings.
+    /// </summary>
+    public static BppGameDataSourceInfo? TryCaptureGameDataSourceInfo(object? source)
+    {
+        if (source is not JsonGameDataManager manager)
+            return null;
+
+        try
+        {
+            var databasePath = DatabasePathField?.GetValue(manager) as string;
+            if (string.IsNullOrWhiteSpace(databasePath))
+            {
+                databasePath = Path.Combine(
+                    TheBazaar.DataManagement.DataManifestActions.GetCachePath(),
+                    "GameData.db"
+                );
+            }
+
+            var directory = Path.GetDirectoryName(databasePath);
+            if (string.IsNullOrWhiteSpace(directory))
+                return null;
+
+            return new BppGameDataSourceInfo(
+                databasePath!,
+                Path.Combine(directory!, "manifest.json"),
+                TheBazaar.Config.DataURL ?? string.Empty
+            );
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+}
+
+internal sealed class BppGameDataSourceInfo
+{
+    public BppGameDataSourceInfo(string databasePath, string manifestPath, string dataBaseUrl)
+    {
+        DatabasePath = databasePath;
+        ManifestPath = manifestPath;
+        DataBaseUrl = dataBaseUrl;
+    }
+
+    public string DatabasePath { get; }
+
+    public string ManifestPath { get; }
+
+    public string DataBaseUrl { get; }
+}

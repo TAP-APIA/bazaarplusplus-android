@@ -1,0 +1,37 @@
+{
+  "name": "bazaarplusplus-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && biome check .",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@cfworker/json-schema": "4.1.1",
+    "@cloudflare/vitest-pool-workers": "0.23.0",
+    "@cloudflare/workers-types": "5.20261010.1",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.4",
+    "wrangler": "4.149.0"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "miniflare": {
+      "undici": "7.29.1"
+    }
+  }
+}

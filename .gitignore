@@ -1,0 +1,148 @@
+﻿# Shared by every project. A project's own .gitignore holds only the outputs
+# that project generates.
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+.vs/
+.fleet/
+.zed/
+.trae/
+*.iml
+*.user
+*.suo
+*.swp
+*.swo
+*~
+
+# Agent tooling (the shared .claude/settings.json is tracked)
+.claude/*
+!.claude/settings.json
+.agents/
+.superpowers/
+.gstack/
+.worktrees/
+
+# Dependencies and tool caches
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.wrangler/
+*.tsbuildinfo
+*.log
+
+# Build and coverage output
+bin/
+obj/
+dist/
+coverage/
+.coverage
+.coverage.*
+*.egg-info/
+
+# Secrets and machine-local config
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+signing-secrets/
+.bpp-local.json
+
+# Android port build output and local artifacts
+
+# .NET build output
+bin/
+obj/
+*.pdb
+*.user
+
+# Node / front-end
+node_modules/
+dist/
+target/
+
+# Android and native binaries
+*.apk
+*.aab
+*.so
+*.dylib
+*.a
+*.jar
+
+# Packaged deliverables
+*.zip
+*.tar
+*.tar.gz
+*.mpack
+*.mpack.gz
+
+# Signing material — never commit
+*.keystore
+*.jks
+*.p12
+*.pem
+*.pfx
+
+# Secrets
+.env
+.env.*
+*.secret
+secrets.json
+
+# Reverse-engineering output and device dumps
+apk_extracted/
+android-managed/
+android-managed-bepinex/
+android-test/
+dumped/
+dumped2/
+dumped3/
+interop/
+interop-unity/
+interop145/
+ilstool/bin/
+ilstool/obj/
+tools/Il2CppDumper/
+tools/Il2CppDumper-v39/
+tools/il2cppinterop/
+tools/platform-tools/
+tools/android-build/
+tools/unitylibs/
+tools/gh/
+tools/dotnet10/
+tools/launcher/
+tools/apktool/
+tools/src/
+unitylibs/
+
+# Test-device evidence: screenshots, UI dumps, logs
+shots/
+account-test-*.png
+account-test-*.log
+bpp-*.png
+bpp-*.log
+ui*.xml
+tmp_ui*.xml
+*.tombstone
+tombstone_*
+logcat*.log
+*.log
+
+# Scratch directories
+par/
+continuation-backup/
+hero-filter-validation/
+lock-backup/
+repo-publish/
+bpp-analyzer-fix/
+
+
+

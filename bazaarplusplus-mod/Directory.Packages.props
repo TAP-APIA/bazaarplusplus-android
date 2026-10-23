@@ -1,0 +1,45 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="BepInEx.Analyzers" Version="1.0.8" />
+    <PackageVersion Include="BepInEx.Core" Version="5.4.21" />
+    <!-- Android IL2CPP port (BppAndroid=true): the Unity IL2CPP runtime replaces BepInEx.Core. -->
+    <PackageVersion Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.790" />
+    <PackageVersion Include="BepInEx.PluginInfoProps" Version="2.1.0" />
+    <PackageVersion Include="JsonSchema.Net" Version="9.4.0" />
+    <PackageVersion Include="Krafs.Publicizer" Version="2.3.2" />
+    <!-- Pin the source generator to the game's Managed/MessagePack.dll (ADR-0010). -->
+    <PackageVersion Include="MessagePackAnalyzer" Version="3.1.4" />
+    <!-- Android IL2CPP port ships its own copies (see build/GameLibraries.props). -->
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
+        <PackageVersion Include="MessagePack" Version="3.1.4" />
+    <PackageVersion Include="MessagePack.Annotations" Version="3.1.4" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="NETStandard.Library" Version="2.0.3" />
+    <PackageVersion Include="SixLabors.ImageSharp" Version="2.1.11" />
+    <PackageVersion Include="SourceGear.sqlite3" Version="3.53.4" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+    <PackageVersion Include="UnityEngine.Modules" Version="2022.3.40" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+  <!--
+    ImageSharp advisories published 2026-10-07 are patched only in 4.1.2 (net8.0);
+    no netstandard2.1 build carries the fix. The mod encodes pixels it captured to PNG
+    and re-encodes its own PNGs to JPEG; it never runs the TIFF codecs or
+    HistogramEqualization, and never decodes images it did not write. Drop these
+    once ImageSharp ships a netstandard2.1 fix or the mod stops depending on it.
+  -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gwg2-r3hj-4w44" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j3p4-wp97-rph4" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j9gm-c75j-xc9q" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-jjfr-hcj7-qf5w" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" />
+  </ItemGroup>
+</Project>
