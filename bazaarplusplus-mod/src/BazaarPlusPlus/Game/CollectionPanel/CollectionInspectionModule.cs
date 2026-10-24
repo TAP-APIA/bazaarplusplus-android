@@ -342,6 +342,88 @@ internal sealed class CollectionInspectionModule
         _presentation.PositionVariantBar(_variantBar, VariantBarGap);
     }
 
+#if BPP_ANDROID
+    /// <summary>
+    /// Centers the BPP quality/enchantment band under the enlarged card in the left half.
+    ///
+    /// Android keeps the game's own drawer on the right, so the description is no longer the
+    /// anchor the band hangs under; the enlarged card is.
+    /// </summary>
+    private void PositionVariantBarUnderCard(Rect cardCell)
+    {
+        if (_variantBar == null)
+            return;
+        var size = _variantBar.Measure();
+        var centerX = cardCell.x + cardCell.width * .5f;
+        // Cell rects run top-down from the screen top; the band is placed in screen coordinates.
+        var cardBottom = Screen.height - (cardCell.y + cardCell.height);
+        var top = Mathf.Max(size.y, cardBottom - VariantBarGap);
+        _variantBar.Root.position = new Vector3(centerX, top, 0f);
+    }
+
+    /// <summary>Left edge of the native right-half drawer, or the measured 3096px-tablet split.</summary>
+    private float AndroidDrawerLeft()
+    {
+        // A drawer still parked off-screen (or one that never measured) must not become the split:
+        // that would center the enlarged card on top of the tray.
+        if (
+            _presentation != null
+            && _presentation.TryGetNativeTrayScreenRect(out var tray)
+            && tray.xMin > 1f
+            && tray.xMin < Screen.width * .9f
+            && tray.width > Screen.width * .2f
+        )
+            return tray.xMin;
+        return Screen.width * .645f;
+    }
+
+    /// <summary>
+    /// Android inspection layout: the enlarged card owns the left half, centered on it, capped at
+    /// 72% of that half's width and 65% of the screen height.
+    /// </summary>
+    private CollectionInspectionLayout AndroidInspectionLayout(
+        float visualWidth,
+        float visualHeight
+    )
+    {
+        var left = AndroidDrawerLeft();
+        var width = Mathf.Max(1f, visualWidth);
+        var height = Mathf.Max(1f, visualHeight);
+        var scale = Mathf.Min(left * .72f / width, Screen.height * .65f / height);
+        var cardWidth = width * scale;
+        var cardHeight = height * scale;
+        var centerX = left * .5f;
+        var centerY = Screen.height * .54f;
+        return new CollectionInspectionLayout(
+            centerX - cardWidth * .5f,
+            centerY - cardHeight * .5f,
+            cardWidth,
+            cardHeight,
+            0f,
+            0f,
+            0f,
+            0f,
+            scale,
+            0f
+        );
+    }
+
+    /// <summary>
+    /// Placeholder card band used while the native preview is still loading, so the selector does
+    /// not jump from the top of the screen once the card arrives.
+    /// </summary>
+    private Rect AndroidPlaceholderCard()
+    {
+        var left = AndroidDrawerLeft();
+        return new Rect(
+            left * .14f,
+            Screen.height * .34f,
+            left * .72f,
+            Screen.height * .40f
+        );
+    }
+#endif
+
     /// <summary>
     /// Vertical gap between the description and the selector, scaled to the viewport so the band
     /// stays tactile on a phone without drifting off a tablet's larger screen.
@@ -392,21 +474,34 @@ internal sealed class CollectionInspectionModule
                 null
             );
         }
+#if BPP_ANDROID
+        _presentation.MeasureDescription(Screen.width * .92f, Screen.height * .74f);
+#else
         var detail = _presentation.MeasureDescription(Screen.width * .92f, Screen.height * .74f);
+#endif
         if (_card == null)
         {
+#if BPP_ANDROID
+            PositionVariantBarUnderCard(AndroidPlaceholderCard());
+#else
             _presentation.PositionDescription(Screen.width / 2f, Screen.height / 2f, 1f);
             _presentation.PositionVariantBar(_variantBar, VariantBarGap);
+#endif
             return;
         }
+#if !BPP_ANDROID
         NativeCardCellFitter.ApplyScale(
             _card.Rect,
             new CollectionGridRect(0f, 0f, Screen.width * .50f, Screen.height * .72f),
             0f,
             _bounds
         );
+#endif
         if (!_bounds.TryGet(out var visual, out _))
             return;
+#if BPP_ANDROID
+        var layout = AndroidInspectionLayout(visual.Width, visual.Height);
+#else
         var baseScale = _card.Rect.localScale;
         var layout = CollectionInspectionLayout.ForContent(
             Screen.width,
@@ -418,6 +513,7 @@ internal sealed class CollectionInspectionModule
         );
         _presentation.PositionDescription(layout.DetailCenterX, layout.DetailCenterY, layout.Scale);
         PositionVariantBar();
+#endif
         var placement = _cardAnchor.Resolve(Screen.width, Screen.height, layout);
         _animation = Mathf.Min(1f, _animation + dt / .25f);
         var progress = 1f - Mathf.Pow(1f - _animation, 3f);
@@ -427,6 +523,9 @@ internal sealed class CollectionInspectionModule
             Vector2.Lerp(origin.position, target.position, progress),
             Vector2.Lerp(origin.size, target.size, progress)
         );
+#if BPP_ANDROID
+        PositionVariantBarUnderCard(rect);
+#endif
         var cell = new CollectionGridRect(rect.x, rect.y, rect.width, rect.height);
         var animatedPlacement = new CollectionInspectionCardPlacement(
             rect.x,

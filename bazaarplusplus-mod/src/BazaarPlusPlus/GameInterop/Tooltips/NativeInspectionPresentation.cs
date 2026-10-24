@@ -2,24 +2,24 @@
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
 using BazaarGameShared.Domain.Core.Types;
-using BazaarPlusPlus.GameInterop;
 using BazaarPlusPlus.Infrastructure.UiTokens;
 using DG.Tweening;
-using HarmonyLib;
 using TheBazaar.UI.Tooltips;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
-#if BPP_ANDROID
-using TheBazaar;
-#endif
 
 namespace BazaarPlusPlus.GameInterop.Tooltips;
 
 // A reversible lease on the native tooltip's canvases. ScreenSpaceOverlay also works when
 // the native inspection backdrop originally belongs to a camera rendered below BPP's UI.
+//
+// Android keeps the tooltip canvases parented instead of promoting them to a bare overlay: the
+// game already ships a right-half drawer for mobile inspection, and detaching it threw away the
+// CanvasScaler geometry and the tray's own layout. BPP only raises the sort order and leaves the
+// description, the viewport mask and the tray backdrops exactly as the game laid them out.
 internal sealed class NativeInspectionPresentation : IDisposable
 {
     private readonly CardTooltipController _controller;
@@ -44,7 +44,9 @@ internal sealed class NativeInspectionPresentation : IDisposable
     private const float TapSlop = 18f;
     private Vector2 _tapOrigin;
     private int _tapFrame = -1;
+#if !BPP_ANDROID
     private Vector3 _descriptionScale;
+#endif
     private static readonly BppFieldAccessor? DropdownList = BppFieldAccessor.Find(
         typeof(TMP_Dropdown),
         "m_Dropdown"
@@ -52,17 +54,17 @@ internal sealed class NativeInspectionPresentation : IDisposable
     private bool _disposed;
     private bool _released;
 #if BPP_ANDROID
-    private readonly List<(Behaviour component, bool enabled)> _mobileDecoration = new();
-    private RectTransform? _auxiliaryRoot;
-    private RectState? _auxiliaryRect;
-    private Vector3 _auxiliaryScale;
-    private Vector3 _fittedAuxiliaryScale;
-    private bool _mobileLegend;
-    private bool _auxiliaryFollowsDescription;
-    private LayoutElement? _legendLayout;
-    private bool _ownsLegendLayout;
-    private bool _legendIgnoredLayout;
-    private bool _legendLayoutEnabled;
+    // The game's own mobile drawer ("Scroll View") keeps its native layout: BPP only snaps it to
+    // the show position the native fade-in uses and remembers what it moved so Release can undo it.
+    private RectTransform? _nativeTrayRect;
+    private Vector2 _nativeTrayAnchoredPosition;
+    private bool _nativeTrayCaptured;
+    private float _positioningAlpha;
+    private bool _positioningAlphaCaptured;
+    // The native drawer brings no opaque panel of its own: its backdrop (lockModeBackgroundImage)
+    // is disabled so it cannot dim the enlarged card, which otherwise leaves the collection's
+    // filter column legible through the description. This plate fills exactly the drawer's rect.
+    private RectTransform? _drawerBackdrop;
 #endif
 
     public RectTransform CardRoot { get; }
@@ -85,6 +87,23 @@ internal sealed class NativeInspectionPresentation : IDisposable
         backdrop.transform.SetParent(_root.transform, false);
         Stretch(backdrop.GetComponent<RectTransform>());
         backdrop.GetComponent<Image>().color = new Color(0f, 0f, 0f, .53f);
+#if BPP_ANDROID
+        var drawerBackdrop = BppGameObjectFactory.Create(
+            "DrawerBackdrop",
+            typeof(RectTransform),
+            typeof(Image)
+        );
+        drawerBackdrop.transform.SetParent(_root.transform, false);
+        _drawerBackdrop = drawerBackdrop.GetComponent<RectTransform>();
+        _drawerBackdrop.anchorMin = _drawerBackdrop.anchorMax = Vector2.zero;
+        _drawerBackdrop.pivot = Vector2.zero;
+        _drawerBackdrop.anchoredPosition = Vector2.zero;
+        _drawerBackdrop.sizeDelta = Vector2.zero;
+        var drawerPlate = drawerBackdrop.GetComponent<Image>();
+        drawerPlate.color = Colors.CollectionPanelBackground;
+        // The plate must never eat taps the drawer and the dismiss background rely on.
+        drawerPlate.raycastTarget = false;
+#endif
         var card = BppGameObjectFactory.Create("InspectionCard", typeof(RectTransform));
         card.transform.SetParent(_root.transform, false);
         CardRoot = card.GetComponent<RectTransform>();
@@ -117,49 +136,24 @@ internal sealed class NativeInspectionPresentation : IDisposable
                 }.Distinct()
             )
                 _canvases.Add(new CanvasLease(native));
+#if BPP_ANDROID
+            // The mobile drawer only reads as the game's own panel while it keeps the tooltip
+            // canvas' CanvasScaler: detaching it resized the 1100px tray to 1414.5px. Promotion is
+            // therefore limited to sort order and raycasting on the parented canvases.
+            const bool detachCanvas = false;
+#else
+            const bool detachCanvas = true;
+#endif
             foreach (var lease in _canvases)
                 lease.Promote(
                     lease.Canvas == controller.RootCanvasComponent
                         ? BppOverlaySorting.InspectionContent
-                        : BppOverlaySorting.InspectionControls
+                        : BppOverlaySorting.InspectionControls,
+                    detach: detachCanvas
                 );
             PromoteVariantControls();
 #if BPP_ANDROID
-            // Inspection positions the description independently of the mobile side tray.
-            // Its viewport mask and tray backdrop must not clip or cover that description.
-            foreach (var scroll in controller.RootCanvasComponent.GetComponentsInChildren<ScrollRect>(true))
-            {
-                if (scroll.viewport == null || !controller.TooltipRectTransform.IsChildOf(scroll.viewport))
-                    continue;
-                foreach (var mask in scroll.viewport.GetComponents<RectMask2D>())
-                    ConcealMobileDecoration(mask);
-                foreach (var mask in scroll.viewport.GetComponents<Mask>())
-                    ConcealMobileDecoration(mask);
-                var viewportImage = scroll.viewport.GetComponent<Image>();
-                if (viewportImage != null)
-                    ConcealMobileDecoration(viewportImage);
-            }
-            ConcealMobileTrayBackdrops();
-            var auxiliary = BppFieldAccessor.Find(typeof(TooltipParentComponent), "_auxiliaryTooltipController")
-                ?.GetValue<AuxiliaryTooltipController>(Data.TooltipParentComponent);
-            _auxiliaryRoot = controller.RootCanvasComponent.GetComponentsInChildren<RectTransform>(true)
-                .FirstOrDefault(candidate => candidate.name == "Legend_Tray");
-            _mobileLegend = _auxiliaryRoot != null;
-            _auxiliaryRoot ??= auxiliary?.auxParent?.transform.AsRectTransform();
-            if (_auxiliaryRoot != null)
-            {
-                _auxiliaryRect = new RectState(_auxiliaryRoot);
-                _auxiliaryScale = _auxiliaryRoot.localScale;
-                _auxiliaryFollowsDescription = _auxiliaryRoot.IsChildOf(controller.TooltipRectTransform);
-                _legendLayout = _auxiliaryRoot.GetComponent<LayoutElement>();
-                _ownsLegendLayout = _legendLayout == null;
-                if (_ownsLegendLayout)
-                    _legendLayout = _auxiliaryRoot.gameObject.AddComponent<LayoutElement>();
-                _legendIgnoredLayout = _legendLayout!.ignoreLayout;
-                _legendLayoutEnabled = _legendLayout.enabled;
-                _legendLayout.enabled = true;
-                _legendLayout.ignoreLayout = true;
-            }
+            PlaceNativeTray();
 #endif
             controller.SetCanvasInteractable(true);
         }
@@ -175,52 +169,35 @@ internal sealed class NativeInspectionPresentation : IDisposable
         if (_released || _controller == null)
             return Vector2.zero;
         CardRoot.sizeDelta = new Vector2(Screen.width, Screen.height);
+#if BPP_ANDROID
+        // The mobile drawer fits the description itself: the Scroll View viewport, its mask and the
+        // tray backdrops all stay native, so nothing here may touch localScale or the layout.
+        if (TryGetNativeTrayScreenRect(out var tray))
+        {
+            UpdateDrawerBackdrop(tray);
+            return tray.size;
+        }
+        return FallbackTraySize;
+#else
         var rect = _controller.TooltipRectTransform;
         rect.localScale = _tooltipRect.Scale;
         var bounds = DescriptionVisualBounds();
-#if BPP_ANDROID
-        if (HasAuxiliary)
-        {
-            _auxiliaryRoot!.localScale = _auxiliaryScale;
-            PositionAuxiliary(bounds);
-            bounds = WithAuxiliary(bounds);
-        }
-#endif
         var fit = NativeInspectionSizing.FitScale(bounds.width, bounds.height, width, height);
         rect.localScale *= fit;
         _descriptionScale = rect.localScale;
-#if BPP_ANDROID
-        if (HasAuxiliary)
-        {
-            if (!_auxiliaryFollowsDescription)
-                _auxiliaryRoot!.localScale *= fit;
-            _fittedAuxiliaryScale = _auxiliaryRoot!.localScale;
-            PositionAuxiliary(DescriptionVisualBounds());
-            return WithAuxiliary(DescriptionVisualBounds()).size;
-        }
-#endif
         return DescriptionVisualBounds().size;
+#endif
     }
 
     public void PositionDescription(float centerX, float centerY, float scale)
     {
+#if BPP_ANDROID
+        // No-op: the native Scroll View owns where the description sits inside the drawer.
+#else
         var rect = _controller.TooltipRectTransform;
         rect.localScale = _descriptionScale * scale;
         var bounds = DescriptionVisualBounds();
-#if BPP_ANDROID
-        if (HasAuxiliary)
-        {
-            _auxiliaryRoot!.localScale = _auxiliaryFollowsDescription
-                ? _auxiliaryScale
-                : _fittedAuxiliaryScale * scale;
-            PositionAuxiliary(bounds);
-            bounds = WithAuxiliary(bounds);
-        }
-#endif
         rect.position += new Vector3(centerX - bounds.center.x, centerY - bounds.center.y, 0f);
-#if BPP_ANDROID
-        if (HasAuxiliary && !_auxiliaryFollowsDescription)
-            _auxiliaryRoot!.position += new Vector3(centerX - bounds.center.x, centerY - bounds.center.y, 0f);
 #endif
     }
 
@@ -236,15 +213,17 @@ internal sealed class NativeInspectionPresentation : IDisposable
     {
         if (bar == null || _released)
             return default;
-        var description = DescriptionVisualBounds();
 #if BPP_ANDROID
-        if (HasAuxiliary)
-            description = WithAuxiliary(description);
-#endif
+        // The Android inspection places the selector under the enlarged card in the left half; the
+        // description now lives inside the native drawer, so it is not the anchor any more.
+        return default;
+#else
+        var description = DescriptionVisualBounds();
         var size = bar.Measure();
         var y = Mathf.Max(0f, description.yMin - verticalGap - size.y);
         bar.Root.position = new Vector3(description.center.x - size.x * .5f, y, 0f);
         return new Rect(description.center.x - size.x * .5f, y, size.x, size.y);
+#endif
     }
 
     // Taps on the inspection overlay. Background dismissal stays a release gesture so dragging
@@ -343,21 +322,28 @@ internal sealed class NativeInspectionPresentation : IDisposable
 #if BPP_ANDROID
         // A quick touch may deliver both edges in one Unity update. Unlike a mouse,
         // TouchControl retains its down position, so both ends can be checked safely.
-        // Never dismiss with the release that created this inspection.
+        // Never dismiss with the release that created this inspection, and never dismiss a
+        // gesture that belongs to the game's own drawer (it has to keep dragging/clicking).
         if (pressed && released && pointer is Touchscreen touchscreen)
         {
             _backgroundPress.Reset();
             var touch = touchscreen.primaryTouch;
             return Time.frameCount > _createdFrame
                 && !IsVariantControlPoint(touch.startPosition.ReadValue())
-                && !IsVariantControlPoint(touch.position.ReadValue());
+                && !IsVariantControlPoint(touch.position.ReadValue())
+                && !IsNativeTrayPoint(touch.startPosition.ReadValue())
+                && !IsNativeTrayPoint(touch.position.ReadValue());
         }
 #endif
+        var point = pointer.position.ReadValue();
         return _backgroundPress.Sample(
             Time.frameCount,
             pressed,
             released,
-            IsVariantControlPoint(pointer.position.ReadValue())
+            IsVariantControlPoint(point)
+#if BPP_ANDROID
+                || IsNativeTrayPoint(point)
+#endif
         );
     }
 
@@ -380,18 +366,13 @@ internal sealed class NativeInspectionPresentation : IDisposable
         foreach (var lease in _canvases.AsEnumerable().Reverse())
             lease.Restore();
 #if BPP_ANDROID
-        foreach (var decoration in _mobileDecoration)
-            if (decoration.component != null)
-                decoration.component.enabled = decoration.enabled;
-        _mobileDecoration.Clear();
-        if (_legendLayout != null)
-        {
-            _legendLayout.ignoreLayout = _legendIgnoredLayout;
-            _legendLayout.enabled = _legendLayoutEnabled;
-            if (_ownsLegendLayout)
-                Object.DestroyImmediate(_legendLayout);
-        }
-        _auxiliaryRect?.Restore();
+        if (_nativeTrayRect != null && _nativeTrayCaptured)
+            _nativeTrayRect.anchoredPosition = _nativeTrayAnchoredPosition;
+        _nativeTrayRect = null;
+        _nativeTrayCaptured = false;
+        if (_positioningAlphaCaptured && _controller != null)
+            _controller.PositioningCanvasGroup.alpha = _positioningAlpha;
+        _positioningAlphaCaptured = false;
 #endif
         _tooltipRect.Restore();
         if (_nativeBackground != null)
@@ -490,78 +471,145 @@ internal sealed class NativeInspectionPresentation : IDisposable
     }
 
 #if BPP_ANDROID
-    private void ConcealMobileDecoration(Behaviour component)
+    /// <summary>
+    /// Screen rectangle the game's own mobile drawer occupies (its <c>Scroll View</c>), converted
+    /// through the tooltip canvas camera when that canvas is not a screen-space overlay.
+    ///
+    /// Everything the Android inspection lays out next to the drawer is derived from this rect, so
+    /// a tablet, a phone or a re-scaled canvas never needs a hard-coded split.
+    /// </summary>
+    public bool TryGetNativeTrayScreenRect(out Rect rect)
     {
-        _mobileDecoration.Add((component, component.enabled));
-        component.enabled = false;
+        rect = default;
+        if (_released || _controller == null)
+            return false;
+        var tray = NativeTrayScrollRect();
+        var trayRect = tray?.transform.AsRectTransform();
+        if (trayRect == null)
+            return false;
+        rect = ToScreenRect(trayRect, _controller.RootCanvasComponent);
+        return rect.width > 1f && rect.height > 1f;
     }
 
-    /// <summary>
-    /// Conceals the mobile side tray's own backdrop graphics, which would otherwise be laid out
-    /// full-screen behind the tray and cover the independently positioned description.
-    ///
-    /// The match is deliberately narrow: only an <see cref="Image"/> or <see cref="RawImage"/>
-    /// whose own GameObject is named as a tray or backdrop counts, and nothing inside the
-    /// description subtree is ever touched. Tray content (icons, captions, the description text)
-    /// keeps its graphics. Registrations go through <see cref="ConcealMobileDecoration"/> so
-    /// <see cref="ReleaseNative"/> restores every original <c>enabled</c> flag.
-    /// </summary>
-    private void ConcealMobileTrayBackdrops()
+    /// <summary>Fallback drawer size while the native Scroll View is not measurable yet.</summary>
+    private static Vector2 FallbackTraySize => new(Screen.width * .355f, Screen.height * .937f);
+
+    private ScrollRect? NativeTrayScrollRect()
     {
-        var root = _controller.RootCanvasComponent;
-        if (root == null)
-            return;
-        var graphics = root.GetComponentsInChildren<Graphic>(true);
-        for (var i = 0; i < graphics.Length; i++)
+        try
         {
-            var graphic = graphics[i];
-            if (graphic == null || !graphic.enabled || !IsMobileTrayBackdropName(graphic.name))
-                continue;
-            // The description is positioned independently, so its own graphics are never tray
-            // decoration. Keep it intact even if a child happens to carry a tray-like name.
-            if (graphic.transform.IsChildOf(_controller.TooltipRectTransform))
-                continue;
-            // Never conceal text, masks or other non-image graphics: only a tray's backdrop.
-            if (graphic.AsImage() == null && graphic.AsIl2Cpp<RawImage>() == null)
-                continue;
-            ConcealMobileDecoration(graphic);
+            return _controller.MobileSecondaryTooltipScrollRect;
+        }
+        catch (Exception)
+        {
+            // A tooltip prefab without the mobile drawer has no such property value.
+            return null;
         }
     }
 
-    private static bool IsMobileTrayBackdropName(string name)
+    /// <summary>
+    /// Snaps the drawer from its off-screen hide position to the position the native fade-in uses,
+    /// so the first frame of the inspection already shows it.
+    ///
+    /// Native <c>MobileTooltipFadeAnimator.GetShowXPosition</c> returns <c>-rect.width</c> for the
+    /// Scroll View's <c>anchoredPosition.x</c>; the disassembly of both that method and
+    /// <c>CreateFadeIn</c> shows it writing that value while keeping the current Y.
+    /// </summary>
+    private void PlaceNativeTray()
     {
-        if (string.IsNullOrEmpty(name))
+        var group = _controller.PositioningCanvasGroup;
+        if (group != null)
+        {
+            _positioningAlpha = group.alpha;
+            _positioningAlphaCaptured = true;
+            group.alpha = 1f;
+        }
+        var tray = NativeTrayScrollRect();
+        _nativeTrayRect = tray?.transform.AsRectTransform();
+        if (_nativeTrayRect == null)
+            return;
+        _nativeTrayAnchoredPosition = _nativeTrayRect.anchoredPosition;
+        _nativeTrayCaptured = true;
+        // The drawer's width is a canvas-unit value, so it must be read from the native layout
+        // instead of being derived from Screen.width while a CanvasScaler is active.
+        Canvas.ForceUpdateCanvases();
+        var width = _nativeTrayRect.rect.width;
+        if (width > 1f)
+        {
+            var position = _nativeTrayAnchoredPosition;
+            position.x = -width;
+            _nativeTrayRect.anchoredPosition = position;
+            if (tray?.content != null)
+                tray.verticalNormalizedPosition = 1f;
+            Canvas.ForceUpdateCanvases();
+        }
+        // Render order is the one part of the Android drawer that only the device can prove:
+        // a camera-rendered tooltip canvas sits below BPP's overlay whatever its sort order says.
+        var canvas = _controller.RootCanvasComponent;
+        var trayScreen = ToScreenRect(_nativeTrayRect, canvas);
+        UpdateDrawerBackdrop(trayScreen);
+        if (canvas != null && trayScreen.width > 1f)
+        {
+            BppLog.InfoEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.CollectionPanel,
+                    "collection_panel.inspection.android_drawer"
+                ),
+                ("render_mode", canvas.renderMode.ToString()),
+                ("override_sorting", canvas.overrideSorting),
+                ("sorting_order", canvas.sortingOrder),
+                ("left", Mathf.RoundToInt(trayScreen.xMin)),
+                ("width", Mathf.RoundToInt(trayScreen.width))
+            );
+        }
+    }
+
+    /// <summary>
+    /// Pins the opaque plate to the game's own Scroll View rect so the collection's filter column
+    /// can never be read through the description. The plate is a child of the BPP overlay canvas,
+    /// which is 1:1 with screen pixels and sorts below the drawer's content canvas.
+    /// </summary>
+    private void UpdateDrawerBackdrop(Rect screenRect)
+    {
+        if (_drawerBackdrop == null || screenRect.width <= 1f || screenRect.height <= 1f)
+            return;
+        _drawerBackdrop.anchoredPosition = new Vector2(screenRect.xMin, screenRect.yMin);
+        _drawerBackdrop.sizeDelta = screenRect.size;
+    }
+
+    private bool IsNativeTrayPoint(Vector2 point)
+    {
+        if (_released || _controller == null)
             return false;
-        return name.IndexOf("tray", StringComparison.OrdinalIgnoreCase) >= 0
-            || name.IndexOf("backdrop", StringComparison.OrdinalIgnoreCase) >= 0;
+        var trayRect = NativeTrayScrollRect()?.transform.AsRectTransform();
+        if (trayRect == null)
+            return false;
+        var canvas = _controller.RootCanvasComponent;
+        var camera =
+            canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? canvas.worldCamera
+                : null;
+        return RectTransformUtility.RectangleContainsScreenPoint(trayRect, point, camera);
     }
 
-    private bool HasAuxiliary => _auxiliaryRoot != null
-        && _auxiliaryRoot.gameObject.activeInHierarchy
-        && (_mobileLegend
-            ? _auxiliaryRoot.GetComponentsInChildren<TMP_Text>(false)
-                .Any(text => !string.IsNullOrWhiteSpace(text.text) && IsVisible(text))
-            : Data.TooltipParentComponent?.IsAuxiliaryTooltipDisplayed == true);
-
-    private void PositionAuxiliary(Rect description)
+    private static Rect ToScreenRect(RectTransform rect, Canvas? canvas)
     {
-        var bounds = ScreenBounds(_auxiliaryRoot!);
-        var gap = Mathf.Min(36f, Screen.width * .012f);
-        _auxiliaryRoot!.position += new Vector3(
-            description.xMax + gap - bounds.xMin,
-            description.center.y - bounds.center.y,
-            0f
-        );
-    }
-
-    private Rect WithAuxiliary(Rect description)
-    {
-        var bounds = ScreenBounds(_auxiliaryRoot!);
+        var corners = new Vector3[4];
+        rect.GetWorldCornersManaged(corners);
+        var camera =
+            canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? canvas.worldCamera
+                : null;
+        if (camera != null)
+        {
+            for (var i = 0; i < corners.Length; i++)
+                corners[i] = RectTransformUtility.WorldToScreenPoint(camera, corners[i]);
+        }
         return Rect.MinMaxRect(
-            Mathf.Min(description.xMin, bounds.xMin),
-            Mathf.Min(description.yMin, bounds.yMin),
-            Mathf.Max(description.xMax, bounds.xMax),
-            Mathf.Max(description.yMax, bounds.yMax)
+            corners.Min(p => p.x),
+            corners.Min(p => p.y),
+            corners.Max(p => p.x),
+            corners.Max(p => p.y)
         );
     }
 #endif
@@ -611,10 +659,6 @@ internal sealed class NativeInspectionPresentation : IDisposable
             )
         )
         {
-#if BPP_ANDROID
-            if (_auxiliaryRoot != null && graphic.transform.IsChildOf(_auxiliaryRoot))
-                continue;
-#endif
             if (!IsVisible(graphic))
                 continue;
             var next = graphic.AsTmpText() is { } text
@@ -687,6 +731,7 @@ internal sealed class NativeInspectionPresentation : IDisposable
         private readonly bool _scalerEnabled;
         private readonly (Canvas canvas, bool sorting, int order, int layer)[] _children;
         private readonly bool _ownsCanvas;
+        private bool _detached;
         private readonly List<RaycasterLease> _raycasters = new();
         private readonly List<(
             CanvasGroup group,
@@ -718,6 +763,7 @@ internal sealed class NativeInspectionPresentation : IDisposable
 
         public void Promote(int order, bool detach = true)
         {
+            _detached = detach;
             if (detach)
             {
                 Canvas.transform.SetParent(null, false);
@@ -786,15 +832,20 @@ internal sealed class NativeInspectionPresentation : IDisposable
             }
             foreach (var raycaster in _raycasters.AsEnumerable().Reverse())
                 raycaster.Restore();
-            _rect.Restore();
-            Canvas.renderMode = _mode;
-            Canvas.worldCamera = _camera;
+            // A lease that never detached its canvas has no transform, render mode or scaler state
+            // to put back; re-parenting it here would move a canvas the game still owns.
+            if (_detached)
+            {
+                _rect.Restore();
+                Canvas.renderMode = _mode;
+                Canvas.worldCamera = _camera;
+                Canvas.scaleFactor = _scale;
+                if (_scaler != null)
+                    _scaler.enabled = _scalerEnabled;
+            }
             Canvas.overrideSorting = _override;
             Canvas.sortingLayerID = _layer;
             Canvas.sortingOrder = _order;
-            Canvas.scaleFactor = _scale;
-            if (_scaler != null)
-                _scaler.enabled = _scalerEnabled;
             if (_ownsCanvas)
             {
                 Canvas.enabled = false;
