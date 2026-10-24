@@ -946,6 +946,12 @@ internal sealed class CollectionPanel
 
     private void InvalidateCatalog(CollectionPanelLogReasonCode reasonCode)
     {
+        // The cause behind a suppressed artKey may be exactly what changed (a locale swap changes
+        // which keys exist, a cold catalog may have warmed). Drop the suppression before the reset
+        // below so the cards rebound by the following load get a real attempt instead of staying
+        // blank for the TTL. Invalidation runs only on locale change and runtime dispose, never per
+        // frame; DisposeAll already clears the same map on teardown, so the null case is a no-op.
+        _artCache?.ClearFailedKeys();
         _viewState.ResetCatalog();
         _catalog.InvalidateCache(reasonCode);
     }

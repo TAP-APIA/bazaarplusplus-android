@@ -35,6 +35,19 @@ internal enum CollectionPanelLogReasonCode
     StaticDataManagerChanged,
     TierTooltipMergeException,
     CachedLoadFailed,
+
+    // The silent exits of CollectionItemLoadArtPatch.LoadArtFromCache. Each one draws the card's
+    // white face instead of art, and each needs a distinct code so a single device log names the
+    // cause: no card data, an unusable art key, a cache miss for the SO, an SO without a material,
+    // a material that could not be built, a material whose main texture never loaded, and a card
+    // that lost its RawImage slot entirely (neither texture nor material can be shown).
+    CardDataMissing,
+    ArtKeyMissing,
+    ArtAssetMissing,
+    CardMaterialMissing,
+    MaterialMissing,
+    CardTextureMissing,
+    CardImageMissing,
     NativePreviewUnavailable,
     NativePreviewRuntimeFailed,
 }

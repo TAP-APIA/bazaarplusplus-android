@@ -24,6 +24,16 @@ Collection and EventPreview share `BppStaticCardMapProvider`, which normally use
 
 Other unknown derived types remain unsupported. If native bulk loading encounters one, `CompatibleCardMapReader` reads the same database in read-only mode with the same value compatibility adapter and omits only unsupported templates. This partial snapshot does not replace the game's cache; malformed data and wholly unsupported catalogs still fail. `static_cards.catalog.unsupported_templates` records accepted and unsupported counts.
 
+## Art load degradation and retry
+
+A failed art bind reports `collection_panel.card_art.degraded` with `status=ArtUnavailable`, storm-keyed on `reason_code` (`src/BazaarPlusPlus/Game/CollectionPanel/Grid/CollectionCardArtCache.cs`). The family has one code per silent exit of `CollectionItemLoadArtPatch.LoadArtFromCache`: `CardDataMissing`, `ArtKeyMissing`, `ArtAssetMissing` (cache miss or failed Addressables load), `CardMaterialMissing` (SO without a material), `MaterialMissing` (material construction failed), `CardTextureMissing` (the SO's material has a null main texture), `CardImageMissing` (the card lost its RawImage slot, so neither texture nor material can reach the screen), and `CachedLoadFailed` for an exception on the path (`src/BazaarPlusPlus/Game/CollectionPanel/CollectionPanelLogCodes.cs`). The event names the `art_key` whenever one is known.
+
+A failed artKey is suppressed for 60 s (`CollectionCardArtCache.FailureRetryDelay`), not permanently: the panel can stay open for hours and cells rebind on every scroll, so a permanent blacklist would turn one transient failure — the catalog still warming, a load cancelled by teardown, memory pressure during a fast scroll — into a blank card for the rest of the session. Suppression is per artKey, expires lazily on the next attempt, and a retry costs one Addressables request; the degraded event is storm-suppressed, so retrying cannot flood the log. The window uses `DateTime.UtcNow`, so a device time-zone change cannot move it.
+
+That window is per cache instance. Every `Open()` constructs a new `CollectionCardArtCache` and `DisposeAll()` clears the failed set, so it does not span panel open/close cycles. `CollectionCardArtCache.ClearFailedKeys()` is the in-session escape hatch: `CollectionPanel.InvalidateCatalog` calls it on locale change (through `NotifyLocaleChanged`) and on runtime dispose (where the caches are already gone, making it a no-op), so cards rebound after a catalog invalidation retry immediately instead of waiting out the TTL. It is never called per frame.
+
+Clearing the failure window is not enough on its own: every failure exit also calls `ClearCachedMaterialAssignment`, and pool release (`CollectionNativeCardPreviewOwner.ReleaseOwnedState`) clears `_cardImage.texture` and `_cardImage.material` before releasing the art refcount. Without that, a pooled card keeps drawing the previous item's art and would still point at a texture or shared Material the cache destroys on eviction.
+
 ## Gotchas
 
 Traps and rules that bite only this feature; most failed silently at least once.

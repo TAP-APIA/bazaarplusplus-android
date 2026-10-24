@@ -16,9 +16,22 @@ namespace BazaarPlusPlus.Game.CollectionPanel.Grid;
 // once per artKey when the panel closes. An LRU bound caps resident SOs at a fixed number
 // regardless of catalog size; the LRU only evicts entries with refcount 0 so handles still
 // in use by active or pooled cards stay resident.
+//
+// A failed artKey is suppressed for a bounded window rather than forever. The panel stays open
+// for hours and the grid re-binds cells on every scroll, so a permanent blacklist turns one
+// transient failure (catalog still warming, a load cancelled by a panel close, memory pressure
+// during a fast scroll) into a blank card for the rest of the process. Retrying is cheap: a
+// broken key fails fast and allocates no entry, and the degraded report is storm-suppressed per
+// reason_code, so retries cost one Addressables request per key per window and no log flood.
 internal sealed class CollectionCardArtCache
 {
     private const int DefaultCapacity = 256;
+
+    // Chosen over per-attempt backoff: an art load either succeeds once its dependency is warm
+    // (seconds) or the key is genuinely absent, in which case one retry per minute per key stays
+    // negligible. Long enough that a fast scroll across many broken keys does not re-request them
+    // on every pass, short enough that a transient failure heals without reopening the panel.
+    private static readonly TimeSpan FailureRetryDelay = TimeSpan.FromSeconds(60);
 
     private readonly int _capacity;
     private readonly Dictionary<string, CacheEntry> _entries = new(StringComparer.Ordinal);
@@ -26,7 +39,13 @@ internal sealed class CollectionCardArtCache
     private readonly Dictionary<string, LinkedListNode<string>> _nodeMap = new(
         StringComparer.Ordinal
     );
-    private readonly HashSet<string> _failedKeys = new(StringComparer.Ordinal);
+
+    // artKey -> the instant after which that key may be loaded again. UtcNow, not Now, so a device
+    // time-zone change cannot move the window, and not a frame counter so retries keep working
+    // while the panel stays open. This window does NOT span panel open/close cycles: every Open()
+    // builds a new cache and DisposeAll() clears this map, so cross-session behaviour is reset by
+    // construction. ClearFailedKeys() is the only in-session escape hatch.
+    private readonly Dictionary<string, DateTime> _failedKeys = new(StringComparer.Ordinal);
 
     public CollectionCardArtCache(int capacity = DefaultCapacity)
     {
@@ -42,8 +61,14 @@ internal sealed class CollectionCardArtCache
     internal void ReportDegraded(
         CollectionPanelLogReasonCode reasonCode,
         string? artKey,
-        Exception exception
+        Exception? exception
     ) => ReportArtDegraded(reasonCode, artKey, exception);
+
+    // Escape hatch for callers that learn the failure cause is gone (catalog refreshed, locale
+    // changed); the TTL covers the passive case. CollectionPanel.InvalidateCatalog calls this so
+    // the cards bound after an invalidation retry immediately instead of staying blank for up to
+    // FailureRetryDelay. Not called per frame: invalidation runs only on locale change or dispose.
+    public void ClearFailedKeys() => _failedKeys.Clear();
 
     // The storm key is the reason code, so a scroll through many broken art keys writes one line
     // per reason per storm window plus a suppressed count.
@@ -70,12 +95,27 @@ internal sealed class CollectionCardArtCache
             BppLog.WarnEvent(degraded, exception, fields);
     }
 
+    private bool IsFailureSuppressed(string artKey)
+    {
+        if (!_failedKeys.TryGetValue(artKey, out var retryAt))
+            return false;
+        if (DateTime.UtcNow < retryAt)
+            return true;
+        // Expired: drop the record so the next load is a real attempt and a fresh failure starts a
+        // new window, instead of the stale timestamp suppressing every attempt from here on.
+        _failedKeys.Remove(artKey);
+        return false;
+    }
+
+    private void MarkFailed(string artKey) =>
+        _failedKeys[artKey] = DateTime.UtcNow + FailureRetryDelay;
+
     private async Task<CardAssetDataSO?> GetCore(string artKey, bool acquireRef)
     {
         if (string.IsNullOrEmpty(artKey))
             return null;
 
-        if (_failedKeys.Contains(artKey))
+        if (IsFailureSuppressed(artKey))
             return null;
 
         if (_entries.TryGetValue(artKey, out var existing))
@@ -95,7 +135,7 @@ internal sealed class CollectionCardArtCache
         catch (Exception ex)
         {
             ReportArtDegraded(CollectionPanelLogReasonCode.AddressablesLoadException, artKey, ex);
-            _failedKeys.Add(artKey);
+            MarkFailed(artKey);
             return null;
         }
 
@@ -110,7 +150,7 @@ internal sealed class CollectionCardArtCache
             {
                 // best-effort
             }
-            _failedKeys.Add(artKey);
+            MarkFailed(artKey);
             return null;
         }
 

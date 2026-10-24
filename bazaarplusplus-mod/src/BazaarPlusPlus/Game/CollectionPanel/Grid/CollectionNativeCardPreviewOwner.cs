@@ -152,6 +152,22 @@ internal sealed class CollectionNativeCardPreviewOwner : INativeCardPreviewOwner
             marker.TooltipRegistered = false;
         }
 
+        // Drop the card's references to the SO texture and the shared Material *before* releasing
+        // the art/material refcounts below: once those refcounts hit zero the cache may evict and
+        // destroy them, and a pooled card still pointing at them would draw a destroyed texture.
+        // Safe for the two callers by construction: BeforeRelease only runs on rollback or pool
+        // recycle (the card is alpha 0 or already leaving), and every acquire runs SetUp ->
+        // LoadArt again before Show, so the cleared slot is refilled before it can be seen.
+        if (cardPreview != null)
+        {
+            var cardImage = cardPreview._cardImage;
+            if (cardImage != null)
+            {
+                cardImage.texture = null;
+                cardImage.material = null;
+            }
+        }
+
         marker?.ReleaseCurrentArtKey();
         if (marker != null)
             marker.OnArtLoaded = null;
