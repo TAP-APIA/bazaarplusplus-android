@@ -130,6 +130,29 @@ internal static class PackageMerchantSummaryText
         passiveText.Append(WrapForPassiveBlock(summary));
     }
 
+#if BPP_ANDROID
+    /// <summary>
+    /// IL2CPP counterpart of the managed overload. The game hands its own projected
+    /// <c>Il2CppSystem.Text.StringBuilder</c> to the native renderer, so the block is trimmed and
+    /// extended on that instance; formatting into a managed copy would never reach the tooltip.
+    /// Trimming goes through <c>Length</c> the same way the managed overload does, so the native
+    /// chunk list shrinks instead of keeping the dropped characters.
+    /// </summary>
+    internal static void AppendToPassiveBlock(
+        Il2CppSystem.Text.StringBuilder passiveText,
+        string summary
+    )
+    {
+        var trimmedLength = passiveText.Length;
+        while (trimmedLength > 0 && passiveText[trimmedLength - 1] is '\r' or '\n')
+            trimmedLength--;
+        if (trimmedLength != passiveText.Length)
+            passiveText.Length = trimmedLength;
+
+        passiveText.Append(WrapForPassiveBlock(summary));
+    }
+#endif
+
     private static string FirstSentence(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
