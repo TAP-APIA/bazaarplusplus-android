@@ -112,11 +112,23 @@ internal static class NativeGameTypography
         }
 
 #if BPP_ANDROID
+        // NotoFontFallbackRuntime publishes its configuration before it loads either primary, so
+        // HasConfiguration alone does not mean the primaries exist yet. Falling back to
+        // TMP_Settings.defaultFontAsset inside that window hands the caller a font without the CJK
+        // fallback chain and still reports Ready, so the caller never retries. Waiting is this
+        // method's existing "not ready, build later" outcome, so reuse it instead of adding an
+        // outcome the callers do not understand.
+        var sansPrimary = NotoFontFallbackRuntime._loadedSansPrimary;
+        var serifPrimary = NotoFontFallbackRuntime._loadedSerifPrimary;
+        if (NotoFontFallbackRuntime.HasConfiguration && sansPrimary == null && serifPrimary == null)
+        {
+            preparation = null;
+            return Outcome.Waiting;
+        }
+
         fontAsset =
-            (role == OwnedTextRole.Heading
-                ? NotoFontFallbackRuntime._loadedSerifPrimary
-                : NotoFontFallbackRuntime._loadedSansPrimary)
-            ?? NotoFontFallbackRuntime._loadedSansPrimary
+            (role == OwnedTextRole.Heading ? serifPrimary : sansPrimary)
+            ?? sansPrimary
             ?? TMP_Settings.defaultFontAsset;
         if (fontAsset != null)
         {
@@ -170,6 +182,13 @@ internal static class NativeGameTypography
         return Outcome.Applied;
     }
 
+    private static OwnedTextRole RoleFor(bool preferSerif) =>
+        preferSerif ? OwnedTextRole.Heading : OwnedTextRole.Body;
+
+    private static bool AnyPrimaryPublished() =>
+        NotoFontFallbackRuntime._loadedSansPrimary != null
+        || NotoFontFallbackRuntime._loadedSerifPrimary != null;
+
     private static bool TryGetSansSourceFont(out Font? sourceFont) =>
         TryGetSourceFont(
             preferSerif: false,
@@ -212,11 +231,16 @@ internal static class NativeGameTypography
 
         if (primary == null)
         {
-            if (NotoFontFallbackRuntime.HasConfiguration)
+            // NotoFontFallbackRuntime publishes its configuration before either primary finishes
+            // loading, so "no primary published yet" is the startup window, not a missing font.
+            // Report only once one primary exists; until then PrepareOwnedText returns
+            // Outcome.Waiting and the caller retries without a degraded line.
+            if (NotoFontFallbackRuntime.HasConfiguration && AnyPrimaryPublished())
                 ReportFailure(
                     NativeGameFontStage.ResolveSourceFont,
                     NativeGameFontReasonCode.SourceFontUnavailable,
-                    null
+                    null,
+                    RoleFor(preferSerif)
                 );
             fontAsset = null;
             return false;
@@ -250,7 +274,8 @@ internal static class NativeGameTypography
             ReportFailure(
                 NativeGameFontStage.ResolveSourceFont,
                 NativeGameFontReasonCode.SourceFontUnavailable,
-                ex
+                ex,
+                RoleFor(preferSerif)
             );
             fontAsset = null;
             return false;
@@ -314,7 +339,8 @@ internal static class NativeGameTypography
                 ReportFailure(
                     NativeGameFontStage.ResolveSourceFont,
                     NativeGameFontReasonCode.SourceFontUnavailable,
-                    null
+                    null,
+                    RoleFor(preferSerif)
                 );
             fontAsset = null;
             return false;
@@ -334,7 +360,8 @@ internal static class NativeGameTypography
                 ReportFailure(
                     NativeGameFontStage.ResolveSourceFont,
                     NativeGameFontReasonCode.SourceFontNotDynamic,
-                    null
+                    null,
+                    RoleFor(preferSerif)
                 );
                 fontAsset = null;
                 return false;
@@ -349,7 +376,8 @@ internal static class NativeGameTypography
         ReportFailure(
             NativeGameFontStage.ResolveSourceFont,
             NativeGameFontReasonCode.SourceFontUnavailable,
-            null
+            null,
+            RoleFor(preferSerif)
         );
         fontAsset = null;
         return false;
@@ -591,6 +619,7 @@ internal static class NativeGameTypography
 
     private static FontLoadAttempt ResolveFallbacks(bool preferSerif)
     {
+        var role = RoleFor(preferSerif);
         var cached = preferSerif ? _serifFallbacks : _sansFallbacks;
         if (cached != null)
             return FontLoadAttempt.Cached(cached);
@@ -606,14 +635,15 @@ internal static class NativeGameTypography
         {
             return FontLoadAttempt.Failed(
                 NativeGameFontStage.ResolveConfiguration,
-                NativeGameFontReasonCode.ConfigurationUnavailable
+                NativeGameFontReasonCode.ConfigurationUnavailable,
+                role: role
             );
         }
 
         var references = preferSerif
             ? rule.NotoSerifFallbacksOrdered
             : rule.NotoSansFallbacksOrdered;
-        var attempt = LoadReferences(references);
+        var attempt = LoadReferences(references, role);
         if (attempt.Fonts.Length > 0)
         {
             if (preferSerif)
@@ -624,12 +654,16 @@ internal static class NativeGameTypography
         return attempt;
     }
 
-    private static FontLoadAttempt LoadReferences(AssetReferenceT<TMP_FontAsset>[]? references)
+    private static FontLoadAttempt LoadReferences(
+        AssetReferenceT<TMP_FontAsset>[]? references,
+        OwnedTextRole role
+    )
     {
         if (references == null || references.Length == 0)
             return FontLoadAttempt.Failed(
                 NativeGameFontStage.LoadFonts,
-                NativeGameFontReasonCode.FontReferencesUnavailable
+                NativeGameFontReasonCode.FontReferencesUnavailable,
+                role: role
             );
 
         var loaded = new List<TMP_FontAsset>(references.Length);
@@ -684,7 +718,8 @@ internal static class NativeGameTypography
                 ? NativeGameFontReasonCode.FontLoadFailed
                 : NativeGameFontReasonCode.FontReferencesUnavailable,
             firstException,
-            wasAttempted: sawValidReference || references.Length > 0
+            wasAttempted: sawValidReference || references.Length > 0,
+            role: role
         );
     }
 
@@ -715,19 +750,35 @@ internal static class NativeGameTypography
         if (attempt.Fonts.Length > 0)
             ReportSuccess(attempt.Fonts, null);
         else
-            ReportFailure(attempt.Stage, attempt.ReasonCode, attempt.Exception);
+            ReportFailure(attempt.Stage, attempt.ReasonCode, attempt.Exception, attempt.Role);
     }
+
+    private static string PrimaryPresence(TMP_FontAsset? primary) =>
+        primary == null ? "absent" : "present";
 
     private static void ReportFailure(
         NativeGameFontStage stage,
         NativeGameFontReasonCode reasonCode,
-        Exception? exception
+        Exception? exception,
+        OwnedTextRole? role = null
     )
     {
         _readyReported = false;
         if (!Health.ObserveFailure(HealthKey, reasonCode))
             return;
-        var fields = new BppLogField[] { ("stage", stage), ("reason_code", reasonCode) };
+        // The two primaries are published after the configuration, so one degraded line must name
+        // the requested role and the game's publish state: absent/absent is the startup window,
+        // while a published sibling with an absent primary is a genuinely missing font.
+        var values = new List<BppLogField>
+        {
+            ("stage", stage),
+            ("reason_code", reasonCode),
+            ("sans_primary", PrimaryPresence(NotoFontFallbackRuntime._loadedSansPrimary)),
+            ("serif_primary", PrimaryPresence(NotoFontFallbackRuntime._loadedSerifPrimary)),
+        };
+        if (role.HasValue)
+            values.Add(("role", role.Value));
+        var fields = values.ToArray();
         if (exception == null)
             BppLog.WarnEvent(
                 new BppLogEvent(
@@ -904,7 +955,8 @@ internal static class NativeGameTypography
             bool wasAttempted,
             NativeGameFontStage stage,
             NativeGameFontReasonCode reasonCode,
-            Exception? exception
+            Exception? exception,
+            OwnedTextRole? role = null
         )
         {
             Fonts = fonts;
@@ -912,6 +964,7 @@ internal static class NativeGameTypography
             Stage = stage;
             ReasonCode = reasonCode;
             Exception = exception;
+            Role = role;
         }
 
         internal TMP_FontAsset[] Fonts { get; }
@@ -919,6 +972,9 @@ internal static class NativeGameTypography
         internal NativeGameFontStage Stage { get; }
         internal NativeGameFontReasonCode ReasonCode { get; }
         internal Exception? Exception { get; }
+
+        /// <summary>The text role that requested the chain, when the call site knows one.</summary>
+        internal OwnedTextRole? Role { get; }
 
         internal static FontLoadAttempt Cached(TMP_FontAsset[] fonts) =>
             new(fonts, false, default, default, null);
@@ -939,8 +995,17 @@ internal static class NativeGameTypography
             NativeGameFontStage stage,
             NativeGameFontReasonCode reasonCode,
             Exception? exception = null,
-            bool wasAttempted = true
-        ) => new(Array.Empty<TMP_FontAsset>(), wasAttempted, stage, reasonCode, exception);
+            bool wasAttempted = true,
+            OwnedTextRole? role = null
+        ) =>
+            new(
+                Array.Empty<TMP_FontAsset>(),
+                wasAttempted,
+                stage,
+                reasonCode,
+                exception,
+                role
+            );
 
         internal FontLoadAttempt MergeFailure(FontLoadAttempt later) =>
             later.WasAttempted ? later : this;
