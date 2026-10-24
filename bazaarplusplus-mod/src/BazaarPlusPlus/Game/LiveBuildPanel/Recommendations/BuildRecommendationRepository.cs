@@ -67,6 +67,19 @@ internal sealed class BuildRecommendationRepository
         return results;
     }
 
+    /// <summary>
+    /// Whether the loaded corpus carries any builds for this hero. Recall returning nothing for a
+    /// hero the analyzer published no ten-win sample for is not a mismatch on the player's
+    /// selection, and the panel must not report it as one.
+    /// </summary>
+    public bool HasBuildsForHero(string? hero)
+    {
+        if (!HeroVisual.IsPlayableHero(hero))
+            return false;
+
+        return EnsureCorpus()?.HasBuildsForHero(hero) ?? false;
+    }
+
     private static BppItemBoard ProjectBoard(TenWinBuild build)
     {
         var cards = build

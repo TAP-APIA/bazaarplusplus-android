@@ -38,7 +38,11 @@
     <RemoteEmbeddedData Include="builds.json">
       <Url>$(TenWinBuildsRemoteUrl)</Url>
       <LogicalName>BazaarPlusPlus.Data.BuildRecommendations.builds.json</LogicalName>
-      <MinBytes>51200</MinBytes>
+      <!-- A structural floor only. The corpus is legitimately small while the analyzer has few
+           accepted ten-win runs (the 2026-10-21 window published 2,117 bytes for 3 builds), so a
+           50 KiB gate rejected the real payload and left the fake-GUID fixture embedded. The
+           production parser is the real schema gate; this only rejects an empty/error document. -->
+      <MinBytes>512</MinBytes>
       <FetchWhenMissing>false</FetchWhenMissing>
       <DestinationPath>$(TenWinBuildsDownloadedPath)</DestinationPath>
     </RemoteEmbeddedData>

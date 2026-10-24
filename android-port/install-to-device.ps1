@@ -47,8 +47,17 @@ foreach ($directory in @('plugins', 'core')) {
     if ($LASTEXITCODE -ne 0) { throw "Cannot create device directory: $directory" }
     Get-ChildItem -LiteralPath $source -Filter *.dll | ForEach-Object {
         foreach ($destination in @("$target/$directory", "$runtimeTarget/$directory")) {
+            # adb writes its progress line to stderr. Windows PowerShell 5.1 wraps a native
+            # command's stderr into a NativeCommandError the moment $ErrorActionPreference is
+            # 'Stop', and neither 2>&1 nor 2>$null suppresses it, so the loop aborts before the
+            # BepInEx/plugins copy is pushed and that directory silently goes stale. Drop the
+            # preference to 'Continue' for the call and judge success by the exit code alone.
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
             & $Adb -s $DeviceId push $_.FullName "$destination/$($_.Name)" 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "adb push failed: $($_.Name) -> $destination" }
+            $pushExitCode = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
+            if ($pushExitCode -ne 0) { throw "adb push failed: $($_.Name) -> $destination" }
         }
         Write-Host ("  pushed both copies: " + $directory + '/' + $_.Name)
     }
@@ -56,7 +65,13 @@ foreach ($directory in @('plugins', 'core')) {
 
 $manifestPath = Join-Path $Modpack 'modpack.json'
 if (Test-Path $manifestPath) {
+    # Same native-stderr trap as the DLL loop above.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $Adb -s $DeviceId push $manifestPath "$target/modpack.json" 2>&1 | Out-Null
+    $pushExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousPreference
+    if ($pushExitCode -ne 0) { throw "adb push failed: modpack.json -> $target" }
     Write-Host "  pushed modpack.json"
 }
 

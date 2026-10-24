@@ -226,19 +226,24 @@ internal static class TenWinBuildTests
     private static void TestRemoteUrlsUseMetricsV6Latest()
     {
         const string expected = "https://bpp-metrics-v6.bazaarplusplus.com/builds/latest.json";
-        var runtimeUrl = (string?)
-            typeof(TenWinBuildCatalogFactory)
-                .GetField("RemoteUrl", BindingFlags.NonPublic | BindingFlags.Static)
-                ?.GetRawConstantValue();
+        var runtimeUrls = TenWinBuildCatalogFactory.RemoteUrls;
+        Assert(
+            runtimeUrls.Length >= 2,
+            "Runtime should keep the contract origin plus at least one fallback origin."
+        );
+        Assert(
+            runtimeUrls[0] == expected,
+            $"Primary runtime URL should use the V6 metrics origin, got '{runtimeUrls[0]}'."
+        );
+        Assert(
+            runtimeUrls.All(url => !string.IsNullOrWhiteSpace(url)),
+            "No runtime origin may be empty."
+        );
         var buildUrl = TestInputs
             .MsBuild("src/BazaarPlusPlus/RemoteEmbeddedData.targets")
             .Descendants()
             .SingleOrDefault(element => element.Name.LocalName == "TenWinBuildsRemoteUrl")
             ?.Value.Trim();
-        Assert(
-            runtimeUrl == expected,
-            $"Runtime URL should use the V6 metrics origin, got '{runtimeUrl}'."
-        );
         Assert(
             buildUrl == expected,
             $"Build URL should use the V6 metrics origin, got '{buildUrl}'."

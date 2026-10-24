@@ -267,6 +267,17 @@ internal sealed class TenWinBuildCorpus
     /// live-state weight, then the analyzer score, then build ID for stability. An empty selection
     /// returns nothing — live state never drives recall, only ranking.
     /// </summary>
+    /// <summary>
+    /// Whether the corpus actually carries builds for this hero. Recall can legitimately return
+    /// nothing for a hero the analyzer published no ten-win sample for, and that is a different
+    /// situation from "the selection matched no build": the panel must say so instead of
+    /// implying the player's candidates are wrong.
+    /// </summary>
+    public bool HasBuildsForHero(string? hero) =>
+        !string.IsNullOrWhiteSpace(hero)
+        && _heroes.TryGetValue(CanonicalizeHeroId(hero!), out var heroData)
+        && heroData.Builds.Count > 0;
+
     public IReadOnlyList<TenWinBuildMatch> FindBuilds(
         string? hero,
         IReadOnlyCollection<Guid> selectedTemplateIds,

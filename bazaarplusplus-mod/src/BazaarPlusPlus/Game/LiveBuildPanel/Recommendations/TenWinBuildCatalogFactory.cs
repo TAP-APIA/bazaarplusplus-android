@@ -10,13 +10,29 @@ internal static class TenWinBuildCatalogFactory
 {
     internal const string EmbeddedResourceName =
         "BazaarPlusPlus.Data.BuildRecommendations.builds.json";
-    private const string RemoteUrl = "https://bpp-metrics-v6.bazaarplusplus.com/builds/latest.json";
+
+    // The V6 metrics origin owns the contract, but its run ingest can publish a one-hero corpus
+    // while the legacy metrics origin still serves the full one. Ordered: primary first.
+    internal static readonly string[] RemoteUrls =
+    {
+        "https://bpp-metrics-v6.bazaarplusplus.com/builds/latest.json",
+        "https://bpp-metrics.bazaarplusplus.com/builds/latest.json",
+    };
     private const string CacheFileName = "builds.json";
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(20);
+
+    // The cache file's write time is not the corpus's age. A corpus whose generated_at is already
+    // days old can land on a device late (a re-download after a long offline spell, a clock that was
+    // behind when the file was written), and RemoteEmbeddedCatalog measures staleness from that
+    // write time alone. At 20 h such a file counted as fresh, so no background refresh ran, no
+    // remote event appeared, and the panel served old builds until the file itself aged out.
+    // One hour bounds how long one cold start may serve a stale copy. A successful refresh rewrites
+    // the file, so later starts inside the hour reuse it instead of re-downloading the ~1 MB payload.
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(1);
     private static readonly HttpClient HttpClient = BppHttpClientFactory.Create(
         productVersion: BppPluginVersion.Current,
         userAgentSuffix: "TenWinBuildRepository",
-        timeout: TimeSpan.FromSeconds(10)
+        // ~1 MB corpus over tablet wifi: the old 10 s budget timed out before the body arrived.
+        timeout: TimeSpan.FromSeconds(30)
     );
 
     internal static IRemoteEmbeddedCatalog<TenWinBuildCorpus> Create(string dataRootPath)
@@ -29,12 +45,21 @@ internal static class TenWinBuildCatalogFactory
                 EmbeddedResourceName
             ),
             cache,
-            new HttpRemoteCatalogSource(HttpClient, RemoteUrl),
+            CreateRemoteSource(),
             SystemCatalogClock.Instance,
             ThreadPoolCatalogRefreshScheduler.Instance,
             new TenWinBuildCatalogObserver(cache.FilePath),
             CacheDuration
         );
+    }
+
+    private static IRemoteCatalogSource CreateRemoteSource()
+    {
+        var sources = new IRemoteCatalogSource[RemoteUrls.Length];
+        for (var index = 0; index < RemoteUrls.Length; index++)
+            sources[index] = new HttpRemoteCatalogSource(HttpClient, RemoteUrls[index]);
+
+        return new FallbackRemoteCatalogSource(sources);
     }
 
     internal static string BuildCacheFilePath(string dataRootPath) =>

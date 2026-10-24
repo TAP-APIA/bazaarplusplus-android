@@ -21,6 +21,13 @@ internal static partial class LiveBuildPanelText
         "暂无匹配的十胜阵容。",
         "暫無匹配的十勝陣容。"
     );
+    // The analyzer published no ten-win sample for this hero in the corpus window, so recall can
+    // never match. Saying "no matching build" here would blame the player's candidates instead.
+    private static readonly LocalizedTextSet NoHeroDataText = new(
+        "No ten-win builds published for this hero yet.",
+        "该英雄暂无十胜阵容样本数据。",
+        "該英雄暫無十勝陣容樣本資料。"
+    );
     private static readonly LocalizedTextSet EmptyShopText = new(
         "No item options in the current shop selection.",
         "当前商店选择里没有物品。",
@@ -44,6 +51,8 @@ internal static partial class LiveBuildPanelText
     public static string NoCandidates() => L.Resolve(NoCandidatesText);
 
     public static string NoRecommendation() => L.Resolve(NoRecommendationText);
+
+    public static string NoHeroData() => L.Resolve(NoHeroDataText);
 
     public static string EmptyShop() => L.Resolve(EmptyShopText);
 

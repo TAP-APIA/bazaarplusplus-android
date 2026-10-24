@@ -13,7 +13,10 @@ internal static class BppOverlaySorting
     public const int InspectionBackdrop = 3000;
     public const int InspectionControls = 3001;
     public const int InspectionContent = 3002;
-    public const int InspectionVariantControls = 3003;
+    // The inspection description is a descendant of the mobile tooltip's Scroll View, so it is
+    // promoted onto its own canvas above every tray decoration. Variant chips stay above it.
+    public const int InspectionDescription = 3003;
+    public const int InspectionVariantControls = 3004;
 #else
     public const int PanelUiToolkit = 26;
     public const int NativeCardPreview = 27;
@@ -21,6 +24,7 @@ internal static class BppOverlaySorting
     public const int InspectionBackdrop = 1000;
     public const int InspectionControls = 1001;
     public const int InspectionContent = 1002;
-    public const int InspectionVariantControls = 1003;
+    public const int InspectionDescription = 1003;
+    public const int InspectionVariantControls = 1004;
 #endif
 }

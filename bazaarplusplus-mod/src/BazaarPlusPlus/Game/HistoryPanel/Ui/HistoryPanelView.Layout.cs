@@ -99,7 +99,15 @@ internal sealed partial class HistoryPanelView
     private void CreateLayout()
     {
         _layout = CreateRect("Layout", _root!.transform, 0, 0, 1, 1);
-        _layout.gameObject.AddComponent<Image>().color = new Color(.055f, .038f, .026f, 1);
+        // Panel-wide backdrop and the panel's modal input wall. A covering parent Image does not
+        // starve the buttons under it: uGUI's RaycastAll returns every Graphic under the pointer,
+        // parent and child alike, and ranks them by depth, so the child button still receives the
+        // click. Clearing this raycastTarget lets taps on empty panel area fall through to the game
+        // UI underneath, because HistoryPanel has no CanvasGroup input gate. The backdrop must keep
+        // eating taps.
+        var layoutBackground = _layout.gameObject.AddComponent<Image>();
+        layoutBackground.color = new Color(.055f, .038f, .026f, 1);
+        layoutBackground.raycastTarget = true;
         Panel(_layout, .014f, .018f, .972f, .962f);
         _title = Text(_layout, "", .04f, .03f, .37f, .06f, 34);
         Button(_layout, HistoryPanelText.Close(), .87f, .04f, .09f, .045f, _close);

@@ -141,7 +141,15 @@ internal sealed class LiveBuildPanelView : IDisposable
         // shrink their content rail relative to the text and header actions.
         scaler.matchWidthOrHeight = 1;
         _layout = Rect("Panel", _root.transform, 0, 0, 1, 1);
-        _layout.gameObject.AddComponent<Image>().color = new Color(.16f, .105f, .065f, 1);
+        // Panel-wide backdrop and the panel's modal input wall. A covering parent Image does not
+        // starve the buttons under it: uGUI's RaycastAll returns every Graphic under the pointer,
+        // parent and child alike, and ranks them by depth, so the child button still receives the
+        // click. Clearing this raycastTarget is what breaks the panel: taps on empty panel area fall
+        // through to the game UI underneath (the gem store opened that way on device), because
+        // LiveBuildPanel has no CanvasGroup input gate. The backdrop must keep eating taps.
+        var layoutBackground = _layout.gameObject.AddComponent<Image>();
+        layoutBackground.color = new Color(.16f, .105f, .065f, 1);
+        layoutBackground.raycastTarget = true;
         _backdrop = Rect("NativeBackdrop", _layout, 0, 0, 1, 1).gameObject.AddComponent<RawImage>();
         _backdrop.raycastTarget = false;
         _backdrop.color = Color.clear;

@@ -49,6 +49,7 @@ $env:DOTNET_ROLL_FORWARD = 'Major'
 `android-port/` 内含：
 
 - `HANDOVER-ANDROID-PORT.md` —— 进展、根因清单、待办
+- `ACCEPTANCE-ROUND1-20261024.md` —— 首轮至第六轮真机验收记录（十胜阵容多源回退、立绘、检视窗遮罩与触控射线校准）
 - `package-modpack.ps1` / `install-to-device.ps1` —— 打包与双写部署
 - `patch-harmony-arm64/` —— ARM64 按值 `CancellationToken` 装箱修补工具
 - `package-managed-codec/`、`codec-smoke/` —— Managed MessagePack 程序集身份打包与验证
@@ -58,7 +59,7 @@ $env:DOTNET_ROLL_FORWARD = 'Major'
 
 为了不让仓库变成构建产物仓库，以下内容全部通过 `.gitignore` 排除：
 
-- 签名材料（keystore / jks / p12）与任何口令、令牌 —— 文档中的历史口令已脱敏为 `<REDACTED>`
+- 签名材料（keystore / jks / p12）与任何口令、令牌 —— 文档中的历史口令与设备 PIN 已脱敏为 `<keystore-password>` / `<device-pin>`
 - APK、`.so`、`.zip` 等二进制交付物
 - 逆向产物（`apk_extracted/`、`android-managed/`、`dumped*/`）
 - 真机截图、UI dump、logcat 与崩溃 tombstone

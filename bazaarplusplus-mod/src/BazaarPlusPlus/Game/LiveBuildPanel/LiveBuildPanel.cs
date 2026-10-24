@@ -146,6 +146,11 @@ internal sealed class LiveBuildPanel
                 {
                     _liveReadRetryRemaining = 0f;
                     _liveSnapshot = snapshot;
+                    // The retry only ever starts when the opening read was empty, so the selection is
+                    // still nothing (an empty board seeded nothing) or the user's own taps; the empty
+                    // guard means this never overwrites choices the player already made.
+                    if (!_candidateState.HasCandidates)
+                        SeedCandidatesFromBoard();
                     ReportLiveSnapshotIssues(outcome.Issues);
                     RefreshRecommendations();
                     RefreshViewAndPreview();
@@ -171,6 +176,7 @@ internal sealed class LiveBuildPanel
         _recommendationIndex = 0;
         var snapshotOutcome = _reader.Read();
         _liveSnapshot = snapshotOutcome.Snapshot;
+        SeedCandidatesFromBoard();
 #if BPP_ANDROID
         _liveReadRetryRemaining = _liveSnapshot.BoardItems.Count + _liveSnapshot.ShopItems.Count + _liveSnapshot.StashItems.Count == 0 ? 30f : 0f;
         _liveReadRetryDelay = .5f;
@@ -179,6 +185,17 @@ internal sealed class LiveBuildPanel
         RefreshRecommendations();
         RefreshViewAndPreview();
         _view?.SetVisible(true);
+    }
+
+    // Opening with an empty selection shows "0 / 0" and no build, which reads as a broken corpus
+    // even when the corpus is fine. The player's own board is the strongest signal of what they
+    // are building, so it becomes the default candidate set; tapping any row still toggles it.
+    // Toggle is a toggle, so the board must be deduped first: two copies of one card would seed
+    // and immediately deselect the same template id.
+    private void SeedCandidatesFromBoard()
+    {
+        foreach (var templateId in TemplateIdsOf(_liveSnapshot.BoardItems))
+            _candidateState.Toggle(templateId);
     }
 
     private static void ReportLiveSnapshotIssues(IReadOnlyList<LiveCardSnapshotIssue> issues)
@@ -296,7 +313,22 @@ internal sealed class LiveBuildPanel
     {
         var request = _refresh.BeginRefresh();
         if (request == LiveBuildRefreshRequest.Ignore)
+        {
+            // Throttled tap (pending or already closing) or a tap the panel never owned. Without
+            // this event the branch was indistinguishable from "the tap missed the button": nothing
+            // was logged and the corpus header simply stayed put. Only the button reaches here, so
+            // this fires at most once per tap and never per frame; Info keeps it visible in the
+            // Release build a device may run, where a Debug event compiles out.
+            BppLog.InfoEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.LiveBuildPanel,
+                    "live_build_panel.refresh.ignored"
+                ),
+                ("request", request),
+                ("has_candidates", _candidateState.HasCandidates)
+            );
             return;
+        }
 
         RefreshStatusView();
         _ = RefreshFinalBuildsAsync(request, Guid.NewGuid());
@@ -615,11 +647,18 @@ internal sealed class LiveBuildPanel
         if (!_candidateState.HasCandidates)
             return (LiveBuildMatchesState.NoCandidates, LiveBuildPanelText.NoCandidates(), null);
         if (recommendation == null)
-            return (
-                LiveBuildMatchesState.NoRecommendation,
-                LiveBuildPanelText.NoRecommendation(),
-                null
-            );
+        {
+            // Distinguish "the corpus has no sample for this hero" from "your candidates match no
+            // published build". The first is an upstream data gap, not a bad selection.
+            var hero = _liveSnapshot.Hero?.ToString();
+            return _recommendations?.HasBuildsForHero(hero) == false
+                ? (LiveBuildMatchesState.NoHeroData, LiveBuildPanelText.NoHeroData(), null)
+                : (
+                    LiveBuildMatchesState.NoRecommendation,
+                    LiveBuildPanelText.NoRecommendation(),
+                    null
+                );
+        }
 
         return (LiveBuildMatchesState.HasRecommendation, string.Empty, recommendation);
     }

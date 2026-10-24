@@ -139,9 +139,7 @@ internal sealed class NativeInspectionPresentation : IDisposable
                 if (viewportImage != null)
                     ConcealMobileDecoration(viewportImage);
             }
-            foreach (var image in controller.RootCanvasComponent.GetComponentsInChildren<Image>(true))
-                if (image.name == "Background_Dark" || image.name.StartsWith("Vertical_Decorator_", StringComparison.Ordinal))
-                    ConcealMobileDecoration(image);
+            ConcealMobileTrayBackdrops();
             var auxiliary = BppFieldAccessor.Find(typeof(TooltipParentComponent), "_auxiliaryTooltipController")
                 ?.GetValue<AuxiliaryTooltipController>(Data.TooltipParentComponent);
             _auxiliaryRoot = controller.RootCanvasComponent.GetComponentsInChildren<RectTransform>(true)
@@ -496,6 +494,46 @@ internal sealed class NativeInspectionPresentation : IDisposable
     {
         _mobileDecoration.Add((component, component.enabled));
         component.enabled = false;
+    }
+
+    /// <summary>
+    /// Conceals the mobile side tray's own backdrop graphics, which would otherwise be laid out
+    /// full-screen behind the tray and cover the independently positioned description.
+    ///
+    /// The match is deliberately narrow: only an <see cref="Image"/> or <see cref="RawImage"/>
+    /// whose own GameObject is named as a tray or backdrop counts, and nothing inside the
+    /// description subtree is ever touched. Tray content (icons, captions, the description text)
+    /// keeps its graphics. Registrations go through <see cref="ConcealMobileDecoration"/> so
+    /// <see cref="ReleaseNative"/> restores every original <c>enabled</c> flag.
+    /// </summary>
+    private void ConcealMobileTrayBackdrops()
+    {
+        var root = _controller.RootCanvasComponent;
+        if (root == null)
+            return;
+        var graphics = root.GetComponentsInChildren<Graphic>(true);
+        for (var i = 0; i < graphics.Length; i++)
+        {
+            var graphic = graphics[i];
+            if (graphic == null || !graphic.enabled || !IsMobileTrayBackdropName(graphic.name))
+                continue;
+            // The description is positioned independently, so its own graphics are never tray
+            // decoration. Keep it intact even if a child happens to carry a tray-like name.
+            if (graphic.transform.IsChildOf(_controller.TooltipRectTransform))
+                continue;
+            // Never conceal text, masks or other non-image graphics: only a tray's backdrop.
+            if (graphic.AsImage() == null && graphic.AsIl2Cpp<RawImage>() == null)
+                continue;
+            ConcealMobileDecoration(graphic);
+        }
+    }
+
+    private static bool IsMobileTrayBackdropName(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return false;
+        return name.IndexOf("tray", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("backdrop", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private bool HasAuxiliary => _auxiliaryRoot != null

@@ -1,4 +1,4 @@
-﻿# BazaarPlusPlus 安卓移植 — 进展交接文档
+# BazaarPlusPlus 安卓移植 — 进展交接文档
 
 ## 2026-10-23 账号实测与录制续接（优先阅读）
 
@@ -57,7 +57,7 @@
 | 设备 | vivo PA2573 平板（Android 16） |
 | adb 序列号 | `400F45F1AX00000` |
 | 物理分辨率 | `2064x3096`，密度 `400` → 横屏逻辑分辨率 `3096x2064` |
-| 锁屏 PIN | `230315` |
+| 锁屏 PIN | `<device-pin>` |
 | adb 路径 | `D:\thebarzaar\tools\platform-tools\platform-tools\adb.exe` |
 
 ### 1.2 游戏与启动链
@@ -129,8 +129,8 @@ foreach ($d in @(
 
 **Keystore**：`<local keystore path — not in repo>`
 **格式**：PKCS12（文件头 `30 82 0A 8E 02 01 03`）
-**storePassword**：`<REDACTED>`
-**keyPassword**：`<REDACTED>`（PKCS12 同值）
+**storePassword**：`<keystore-password>`
+**keyPassword**：`<keystore-password>`（PKCS12 同值）
 **alias**：`bpp`（`PrivateKeyEntry`，创建于 2026-10-21）
 **证书**：`CN=BazaarPlusPlus, OU=Android, O=BPP, L=CN, ST=CN, C=CN`
 **证书 SHA-256**：`F8:D5:CE:5D:85:2D:94:94:DA:8B:87:4E:CD:D0:98:28:57:BB:1B:8A:42:2D:B8:DB:9F:96:5B:84:FF:EB:A1:9C`
@@ -141,8 +141,8 @@ foreach ($d in @(
 
 ```powershell
 $env:JAVA_TOOL_OPTIONS = $null
-$env:BPP_APK_STORE_PASSWORD = '<REDACTED>'
-$env:BPP_APK_KEY_PASSWORD   = '<REDACTED>'
+$env:BPP_APK_STORE_PASSWORD = '<keystore-password>'
+$env:BPP_APK_KEY_PASSWORD   = '<keystore-password>'
 & powershell -NoProfile -ExecutionPolicy Bypass -File D:\thebarzaar\dist\package-launcher.ps1 `
     -SourceApk 'D:\thebarzaar\dist\BepInExLauncher-android-fixed.apk' `
     -Destination 'D:\thebarzaar\dist\BepInExLauncher-android-updated.apk'
@@ -155,7 +155,7 @@ $env:BPP_APK_KEY_PASSWORD   = '<REDACTED>'
 4. 删除旧 `META-INF/*.SF|RSA|DSA|EC` 签名 → `zipalign -P 16`；
 5. `apksigner sign --ks bpp.keystore --ks-pass env:BPP_APK_STORE_PASSWORD --ks-key-alias bpp` 并 `verify --print-certs`。
 
-> ⚠️ **本仓库不保存任何凭据，口令已脱敏为 <REDACTED>，原值见本地私有记录；密码从未落盘**。原 agent 只留了环境变量契约（`package-launcher.ps1` 第 56–58 行在变量为空时直接 `throw`）。密码 `<REDACTED>` 是本次 2026-10-22 通过候选恢复实测得出，已固化到本节。
+> ⚠️ **本仓库不保存任何凭据，口令已脱敏为 `<keystore-password>`，原值见本地私有记录；密码从未落盘**。原 agent 只留了环境变量契约（`package-launcher.ps1` 第 56–58 行在变量为空时直接 `throw`）。密码 `<keystore-password>` 是本次 2026-10-22 通过候选恢复实测得出，已固化到本节。
 
 > ⚠️ **签名不一致的坑（务必先读 §四 P2-1）**：平板当前安装的启动器是 **debug 证书**签的，不是 `bpp.keystore`。用 `bpp.keystore` 签的新包**无法覆盖安装**。
 
@@ -418,7 +418,7 @@ SHA256：`39AB3DE276D528D84E06968D8DE6261E505357A93114F105228A6A6B9A77C4FE`
 
 2. **切换到 BPP 自有签名**（正式交付形态，需用户卸载一次旧包）
    ```powershell
-   $env:BPP_APK_STORE_PASSWORD = '<REDACTED>'
+   $env:BPP_APK_STORE_PASSWORD = '<keystore-password>'
    & powershell -NoProfile -ExecutionPolicy Bypass -File D:\thebarzaar\dist\package-launcher.ps1
    adb uninstall com.bepinex.android       # 会清掉 launcher 的配置（含已选 modpack）
    adb install D:\thebarzaar\dist\BepInExLauncher-android-updated.apk

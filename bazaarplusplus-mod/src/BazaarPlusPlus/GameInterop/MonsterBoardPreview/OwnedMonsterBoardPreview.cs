@@ -98,7 +98,10 @@ internal sealed partial class OwnedMonsterBoardPreview : IDisposable
         _skillViewport.anchorMin = new Vector2(0, skillsBelow ? 0 : .78f);
         _skillViewport.anchorMax = new Vector2(1, skillsBelow ? .22f : 1);
         _skillViewport.gameObject.AddComponent<RectMask2D>();
-        _skillViewport.gameObject.AddComponent<Image>().color = Color.clear;
+        var skillViewportImage = _skillViewport.gameObject.AddComponent<Image>();
+        skillViewportImage.color = Color.clear;
+        // Transparent fill only: it must not intercept taps meant for the cards underneath.
+        skillViewportImage.raycastTarget = false;
         _skillContent = Region("SkillsContent", _skillViewport);
         _skillContent.anchorMin = Vector2.zero;
         _skillContent.anchorMax = new Vector2(0, 1);
