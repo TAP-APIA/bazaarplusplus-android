@@ -19,7 +19,8 @@
 | 白块加固三项 | ✅ 已落地、已部署、`card_art.degraded=0` | `_r10_cards.png` |
 | 十胜阵容 | ✅ 5,689 套 | `_r8_builds.png` |
 | SQLite | ✅ `plugin.android.sqlite.loaded` | `_r8_LogOutput.log` |
-| 字体降级 | ⚠️ 启动时序竞态误报，1 次自愈，无显示影响 | 见 §五 |
+| 字体降级 | ✅ 已修：冷启动后 `native_game_fonts.degraded` 完全消失 | `_r11` 启动日志 |
+| 商家包摘要补丁 | 🔄 已恢复（移除 `Prepare()=>false`），待对局内包裹验证 | 见 §六 |
 
 ---
 
@@ -83,6 +84,7 @@ playback.succeeded        battle_id=00f38840 source=local_saved end_reason_code=
 - 资源本身完好：Addressables 按 RuntimeKey 加载（无大小写问题），APK 内 zh-CN 字体 3+3 齐全。
 - 潜在风险：窗口内 `PrepareOwnedText` 会退回 `TMP_Settings.defaultFontAsset` 且不再重试，存在豆腐块风险。
 - 已修：上报加 `AnyPrimaryPublished()` 前置条件、`HasConfiguration && 两 primary 皆空` 时返回 `Waiting`、degraded 字段补 `sans_primary/serif_primary/role`。
+- **真机确认（2026-10-24 11:2x 冷启动）**：`LogOutput.log` 中 `native_game_fonts` 相关事件**一条都没有**（degraded/recovered/loaded 全部消失），`plugin.initialization.succeeded` 正常。
 
 ---
 
@@ -90,7 +92,7 @@ playback.succeeded        battle_id=00f38840 source=local_saved end_reason_code=
 
 | 特性 | 结论 |
 |---|---|
-| `package_merchant_summary` | **可修**（补丁声明 `System.ValueTuple`，设备端是 `Il2CppSystem.ValueTuple`；24 字节引用型 tuple 走返回缓冲，ABI 正确） |
+| `package_merchant_summary` | **已修**：`__result` 改为 `Il2CppSystem.ValueTuple<StringBuilder, Nullable<TooltipSegment>>` 并按值原地 append；能力清单已移除该项（真机 `patch_capabilities` 确认）。待对局内包裹验证 `tooltips.package_merchant_summary.applied` |
 | `multi_tier_passive_tooltips` | **可修**（同一根因、同一方法） |
 | `voice_callbacks` | transpiler 路径不可修；可改走 eventPath 元数据，需真机探针 |
 | `upgrade_value_tuples` | 16 字节内联返回 ABI，当前钩子不可修，只能换钩子 |
