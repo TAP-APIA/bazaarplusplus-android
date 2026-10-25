@@ -1,8 +1,8 @@
 #nullable enable
-using BazaarPlusPlus.GameInterop;
 using BazaarGameShared.Domain.Core.Types;
 using BazaarPlusPlus.Game.LiveBuildPanel.Data;
 using BazaarPlusPlus.Game.Supporters.Ui;
+using BazaarPlusPlus.GameInterop;
 using BazaarPlusPlus.GameInterop.AssetLoading;
 using BazaarPlusPlus.GameInterop.Fonts;
 using BazaarPlusPlus.GameInterop.HeroPortraits;
@@ -57,6 +57,7 @@ internal sealed class LiveBuildPanelView : IDisposable
     private RectTransform? _layout;
     private RectTransform? _markerRoot;
     private Vector2 _screenSize;
+    private Rect _lastSafeArea;
     private int _layoutFrames = 2;
     private RectTransform? _supporterHost;
     private RectTransform? _sidebar;
@@ -140,7 +141,18 @@ internal sealed class LiveBuildPanelView : IDisposable
         // Four stacked carpets are height-constrained; wider displays must not
         // shrink their content rail relative to the text and header actions.
         scaler.matchWidthOrHeight = 1;
+
+        // Full-screen backdrop and input wall preventing clicks from falling through on notch/cutout edges.
+        var fullModalWall = Rect("FullModalWall", _root.transform, 0, 0, 1, 1);
+        var fullModalImage = fullModalWall.gameObject.AddComponent<Image>();
+        fullModalImage.color = new Color(.16f, .105f, .065f, 1);
+        fullModalImage.raycastTarget = true;
+
         _layout = Rect("Panel", _root.transform, 0, 0, 1, 1);
+        ApplySafeAreaInsets();
+        _lastSafeArea = Screen.safeArea;
+        _screenSize = new Vector2(Screen.width, Screen.height);
+
         // Panel-wide backdrop and the panel's modal input wall. A covering parent Image does not
         // starve the buttons under it: uGUI's RaycastAll returns every Graphic under the pointer,
         // parent and child alike, and ranks them by depth, so the child button still receives the
@@ -429,9 +441,12 @@ internal sealed class LiveBuildPanelView : IDisposable
             _portraitLoad = null;
         }
         var screen = new Vector2(Screen.width, Screen.height);
-        if (_screenSize != screen)
+        var safeArea = Screen.safeArea;
+        var viewportChanged = ApplySafeAreaInsets();
+        if (_screenSize != screen || _lastSafeArea != safeArea || viewportChanged)
         {
             _screenSize = screen;
+            _lastSafeArea = safeArea;
             _layoutFrames = 2;
         }
         if (_layoutFrames > 0)
@@ -571,7 +586,13 @@ internal sealed class LiveBuildPanelView : IDisposable
         var contentWidth = LiveBuildPanelLayout.SidebarWidth - 48;
         Place(_sidebar!, sidebarLeft, 20, LiveBuildPanelLayout.SidebarWidth, _geometry.Height - 40);
         Place(_title!.rectTransform, contentLeft, 42, contentWidth - 80, 64);
-        Place(_closeButton!.transform.RequireRectTransform(), contentLeft + contentWidth - 68, 58, 68, 32);
+        Place(
+            _closeButton!.transform.RequireRectTransform(),
+            contentLeft + contentWidth - 68,
+            58,
+            68,
+            32
+        );
         Place(_corpusGroup!, contentLeft, 156, contentWidth, 128);
         Place(_corpusTitle!.rectTransform, 0, 14, contentWidth - 108, 28);
         Place(_refreshButton!.transform.RequireRectTransform(), contentWidth - 94, 14, 94, 28);
@@ -597,7 +618,13 @@ internal sealed class LiveBuildPanelView : IDisposable
         );
         Place(_supporterHost!, contentLeft, _geometry.Height - 286, contentWidth, 240);
         // Anchored under the line it explains, not at a fixed offset over the boards.
-        Place(_corpusDetail!.transform.parent.RequireRectTransform(), contentLeft, 290, contentWidth, 110);
+        Place(
+            _corpusDetail!.transform.parent.RequireRectTransform(),
+            contentLeft,
+            290,
+            contentWidth,
+            110
+        );
         Place(
             _hint!.rectTransform,
             left,
@@ -691,7 +718,9 @@ internal sealed class LiveBuildPanelView : IDisposable
         float height
     )
     {
-        var rect = BppGameObjectFactory.Create(name, typeof(RectTransform)).GetComponent<RectTransform>();
+        var rect = BppGameObjectFactory
+            .Create(name, typeof(RectTransform))
+            .GetComponent<RectTransform>();
         rect.SetParent(parent, false);
         rect.anchorMin = new Vector2(x, 1 - y - height);
         rect.anchorMax = new Vector2(x + width, 1 - y);
@@ -779,6 +808,31 @@ internal sealed class LiveBuildPanelView : IDisposable
         text.overflowMode = TextOverflowModes.Ellipsis;
         text.raycastTarget = false;
         return text;
+    }
+
+    private bool ApplySafeAreaInsets()
+    {
+        if (_layout == null || _root == null)
+            return false;
+        var scale = CanvasScale;
+        if (scale <= 0.001f)
+            return false;
+#if BPP_ANDROID
+        var safe = AndroidOverlayViewport.ContentPixels;
+#else
+        var safe = Screen.safeArea;
+#endif
+        var insetLeft = Mathf.Max(0f, safe.xMin / scale);
+        var insetRight = Mathf.Max(0f, (Screen.width - safe.xMax) / scale);
+        var insetTop = Mathf.Max(0f, (Screen.height - safe.yMax) / scale);
+        var insetBottom = Mathf.Max(0f, safe.yMin / scale);
+        var min = new Vector2(insetLeft, insetBottom);
+        var max = new Vector2(-insetRight, -insetTop);
+        if (_layout.offsetMin == min && _layout.offsetMax == max)
+            return false;
+        _layout.offsetMin = min;
+        _layout.offsetMax = max;
+        return true;
     }
 
     public void Dispose()

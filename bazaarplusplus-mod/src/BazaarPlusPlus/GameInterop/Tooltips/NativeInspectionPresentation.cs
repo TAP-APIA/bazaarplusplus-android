@@ -1,7 +1,7 @@
 #nullable enable
+using BazaarGameShared.Domain.Core.Types;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
-using BazaarGameShared.Domain.Core.Types;
 using BazaarPlusPlus.Infrastructure.UiTokens;
 using DG.Tweening;
 using TheBazaar.UI.Tooltips;
@@ -36,10 +36,12 @@ internal sealed class NativeInspectionPresentation : IDisposable
     private readonly List<Selectable> _controls = new();
     private readonly List<TMP_Dropdown> _dropdowns = new();
     private readonly List<TMP_Text> _captions = new();
+
     // BPP-owned quality/enchantment chips live outside the native panel subtree, so they
     // register their own hit regions instead of being discovered by PromoteVariantControls.
     private readonly List<RectTransform> _protectedControls = new();
     private InspectionNestedTooltips? _nestedTooltips;
+
     // Finger travel beyond this many pixels is a drag/scroll, not a tap.
     private const float TapSlop = 18f;
     private Vector2 _tapOrigin;
@@ -61,6 +63,7 @@ internal sealed class NativeInspectionPresentation : IDisposable
     private bool _nativeTrayCaptured;
     private float _positioningAlpha;
     private bool _positioningAlphaCaptured;
+
     // The native drawer brings no opaque panel of its own: its backdrop (lockModeBackgroundImage)
     // is disabled so it cannot dim the enlarged card, which otherwise leaves the collection's
     // filter column legible through the description. This plate fills exactly the drawer's rect.
@@ -83,7 +86,11 @@ internal sealed class NativeInspectionPresentation : IDisposable
         var canvas = _root.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = BppOverlaySorting.InspectionBackdrop;
-        var backdrop = BppGameObjectFactory.Create("DismissBackground", typeof(RectTransform), typeof(Image));
+        var backdrop = BppGameObjectFactory.Create(
+            "DismissBackground",
+            typeof(RectTransform),
+            typeof(Image)
+        );
         backdrop.transform.SetParent(_root.transform, false);
         Stretch(backdrop.GetComponent<RectTransform>());
         backdrop.GetComponent<Image>().color = new Color(0f, 0f, 0f, .53f);
@@ -153,6 +160,7 @@ internal sealed class NativeInspectionPresentation : IDisposable
                 );
             PromoteVariantControls();
 #if BPP_ANDROID
+            PromoteDescriptionCanvas();
             PlaceNativeTray();
 #endif
             controller.SetCanvasInteractable(true);
@@ -471,6 +479,21 @@ internal sealed class NativeInspectionPresentation : IDisposable
     }
 
 #if BPP_ANDROID
+    private void PromoteDescriptionCanvas()
+    {
+        var content = _controller.CanvasContentRectTransform;
+        var canvas = content.GetComponentInParent<Canvas>();
+        var ownsCanvas = canvas == null || canvas == _controller.RootCanvasComponent;
+        if (ownsCanvas)
+            canvas = content.gameObject.AddComponent<Canvas>();
+        // The mobile tray and Tooltip_Canvas are independent canvas batches. Giving both the
+        // same order lets the tray's Background_Dark composite over the description. Raise only
+        // the description, keeping the native scaler, scroll viewport and mask in place.
+        var lease = new CanvasLease(canvas!, ownsCanvas);
+        _canvases.Add(lease);
+        lease.Promote(BppOverlaySorting.InspectionDescription, detach: false);
+    }
+
     /// <summary>
     /// Screen rectangle the game's own mobile drawer occupies (its <c>Scroll View</c>), converted
     /// through the tooltip canvas camera when that canvas is not a screen-space overlay.
@@ -487,6 +510,14 @@ internal sealed class NativeInspectionPresentation : IDisposable
         var trayRect = tray?.transform.AsRectTransform();
         if (trayRect == null)
             return false;
+        // Keep the native drawer snapped flush to the right edge if width adjusted after canvas scaling.
+        var width = trayRect.rect.width;
+        if (width > 1f && Mathf.Abs(trayRect.anchoredPosition.x - (-width)) > 0.5f)
+        {
+            var pos = trayRect.anchoredPosition;
+            pos.x = -width;
+            trayRect.anchoredPosition = pos;
+        }
         rect = ToScreenRect(trayRect, _controller.RootCanvasComponent);
         return rect.width > 1f && rect.height > 1f;
     }
@@ -558,6 +589,13 @@ internal sealed class NativeInspectionPresentation : IDisposable
                 ("render_mode", canvas.renderMode.ToString()),
                 ("override_sorting", canvas.overrideSorting),
                 ("sorting_order", canvas.sortingOrder),
+                (
+                    "description_order",
+                    _controller
+                        .CanvasContentRectTransform.GetComponentInParent<Canvas>()
+                        ?.sortingOrder
+                        ?? -1
+                ),
                 ("left", Mathf.RoundToInt(trayScreen.xMin)),
                 ("width", Mathf.RoundToInt(trayScreen.width))
             );
@@ -623,7 +661,8 @@ internal sealed class NativeInspectionPresentation : IDisposable
                 && ScreenBounds(rect).Contains(point)
             )
         )
-            return true;        if (
+            return true;
+        if (
             _controls.Any(control =>
                 control != null
                 && control.isActiveAndEnabled

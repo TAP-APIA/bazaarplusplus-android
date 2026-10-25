@@ -1,5 +1,6 @@
 #pragma warning disable CS0436
 #nullable enable
+using BazaarPlusPlus.Core.Config;
 using BazaarPlusPlus.Core.Runtime;
 using BazaarPlusPlus.Game.CollectionPanel.Data;
 using BazaarPlusPlus.Game.CombatReplay;
@@ -25,11 +26,11 @@ using BazaarPlusPlus.Storage.Paths;
 using BazaarPlusPlus.Storage.Sqlite;
 using BepInEx;
 using BepInEx.Configuration;
+using HarmonyLib;
+using UnityEngine;
 #if BPP_ANDROID
 using BepInEx.Unity.IL2CPP;
 #endif
-using HarmonyLib;
-using UnityEngine;
 
 namespace BazaarPlusPlus;
 
@@ -77,7 +78,11 @@ public class Plugin : BaseUnityPlugin
                         : null;
                 AppDomain.CurrentDomain.AssemblyResolve += (_, args) =>
                     args.Name.StartsWith("Newtonsoft.Json,", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(args.Name, "Newtonsoft.Json", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(
+                        args.Name,
+                        "Newtonsoft.Json",
+                        StringComparison.OrdinalIgnoreCase
+                    )
                         ? asm
                         : null;
                 BppStartupTrace.Write("plugin:newtonsoft-preloaded " + asm.FullName);
@@ -98,6 +103,7 @@ public class Plugin : BaseUnityPlugin
     {
         BppLog.Install(Log);
         AndroidNativeLibraries.Initialize();
+        AndroidTlsCertificateBridge.Initialize();
         RegisterManagedComponents();
         _host = BppGameObjectFactory.Create("BazaarPlusPlus");
         UnityEngine.Object.DontDestroyOnLoad(_host);
@@ -290,8 +296,23 @@ public class Plugin : BaseUnityPlugin
         LegendaryPositionDisplayFormatter.Install(services.Config);
         var config = services.Config;
         L.Install(
-            ReadGameLanguageCode,
+            () => ResolveUiLanguageCode(config),
             () => ChineseScriptConverter.NormalizeMode(config.ChineseLocaleModeConfig.Value)
+        );
+        BppLog.InfoEvent(
+            new BppLogEvent(BppLogFeatureScope.Plugin, "plugin.localization.language"),
+            ("configured", config.UiLanguageConfig.Value.ToString()),
+            ("game_language", ReadGameLanguageCode()),
+            ("system_language", Application.systemLanguage.ToString()),
+            ("resolved", ResolveUiLanguageCode(config))
+        );
+        BppTouchEntry.Install(
+            new Vector2(config.TouchDockAnchorXConfig.Value, config.TouchDockAnchorYConfig.Value),
+            anchor =>
+            {
+                config.TouchDockAnchorXConfig.Value = Mathf.Clamp01(anchor.x);
+                config.TouchDockAnchorYConfig.Value = Mathf.Clamp01(anchor.y);
+            }
         );
         var attributeUnitLocalizer = BppTooltipText.TryLocalizeKeyword;
         CollectionLocalizationResolver.AttributeUnitLocalizer = attributeUnitLocalizer;
@@ -313,9 +334,48 @@ public class Plugin : BaseUnityPlugin
         }
     }
 
+    // Auto follows the game so the mod's own text matches the tooltips it sits next to. Android
+    // builds that never persist PreferencesData store no code at all and would otherwise fall back
+    // to English, so the system language is the second choice and an explicit override wins.
+    private static string ResolveUiLanguageCode(BppConfig config)
+    {
+        switch (config.UiLanguageConfig.Value)
+        {
+            case BppUiLanguage.English:
+                return "en";
+            case BppUiLanguage.Chinese:
+                return "zh-Hans";
+            case BppUiLanguage.German:
+                return "de";
+            case BppUiLanguage.Portuguese:
+                return "pt-BR";
+            case BppUiLanguage.Korean:
+                return "ko";
+            case BppUiLanguage.Italian:
+                return "it";
+        }
+
+        var game = ReadGameLanguageCode();
+        if (!string.IsNullOrWhiteSpace(game))
+            return game;
+
+        return Application.systemLanguage switch
+        {
+            SystemLanguage.ChineseSimplified => "zh-Hans",
+            SystemLanguage.ChineseTraditional => "zh-Hant",
+            SystemLanguage.Chinese => "zh",
+            SystemLanguage.German => "de",
+            SystemLanguage.Portuguese => "pt-BR",
+            SystemLanguage.Korean => "ko",
+            SystemLanguage.Italian => "it",
+            _ => "en",
+        };
+    }
+
     private static void UninstallStaticUtilities()
     {
         LegendaryPositionDisplayFormatter.Reset();
+        BppTouchEntry.Reset();
         L.Reset();
         CollectionLocalizationResolver.AttributeUnitLocalizer = null;
         EventPreviewLocalization.AttributeUnitLocalizer = null;
@@ -419,7 +479,10 @@ public class Plugin : BaseUnityPlugin
 #if BPP_ANDROID
         BppLog.InfoEvent(
             new BppLogEvent(BppLogFeatureScope.Plugin, "plugin.android.patch_capabilities"),
-            ("unsupported_features", "voice_callbacks,collection_variant_controls,multi_tier_passive_tooltips,upgrade_value_tuples")
+            (
+                "unsupported_features",
+                "voice_callbacks,collection_variant_controls,upgrade_value_tuples,multi_tier_passive_tooltips,package_merchant_summary"
+            )
         );
 #endif
         var failedClasses = 0;

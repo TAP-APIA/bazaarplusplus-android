@@ -17,10 +17,17 @@ internal static class CollectionTierTooltipPreview
 
     public static bool IsRenderingVariant => _isRenderingVariant;
 
+#if BPP_ANDROID
     public static void MergeActive(
         CardTooltipData tooltipData,
         Il2CppSystem.Collections.Generic.List<TooltipSegment>? originalSegments
     )
+#else
+    public static void MergeActive(
+        CardTooltipData tooltipData,
+        List<TooltipSegment>? originalSegments
+    )
+#endif
     {
         if (
             originalSegments == null
@@ -34,7 +41,9 @@ internal static class CollectionTierTooltipPreview
         {
             if (tier == tooltipData.CardInstance.Tier)
             {
-                variants.Add(originalSegments.ToManaged().Select(segment => segment.Text).ToArray());
+                variants.Add(
+                    originalSegments.ToManaged().Select(segment => segment.Text).ToArray()
+                );
                 continue;
             }
 
@@ -121,6 +130,65 @@ internal static class CollectionTierTooltipPreview
         }
     }
 
+#if BPP_ANDROID
+    public static void MergePassive(
+        CardTooltipData tooltipData,
+        Il2CppSystem.ValueTuple<
+            Il2CppSystem.Text.StringBuilder,
+            Il2CppSystem.Nullable<TooltipSegment>
+        > original
+    )
+    {
+        if (original.Item1 != null)
+            MergePassive(tooltipData, original.Item1);
+    }
+
+    public static void MergePassive(
+        CardTooltipData tooltipData,
+        Il2CppSystem.Text.StringBuilder originalBuilder
+    )
+    {
+        if (
+            originalBuilder == null
+            || !TryGetPreviewTiers(tooltipData, out var tiers)
+            || tiers.Count < 2
+        )
+            return;
+
+        var variants = new List<IReadOnlyList<string>>(tiers.Count);
+        foreach (var tier in tiers)
+        {
+            if (tier == tooltipData.CardInstance.Tier)
+            {
+                variants.Add(SplitLines(originalBuilder));
+                continue;
+            }
+
+            var tierData = CreateTierTooltipData(tooltipData, tier);
+            var tierResult = RenderVariant(() =>
+                tierData.GetPassiveTooltipBlock(tierData.CardInstance)
+            );
+            try
+            {
+                variants.Add(SplitLines(tierResult.Item1));
+            }
+            finally
+            {
+                tierResult.Item1.ReturnStringBuilder();
+            }
+        }
+
+        originalBuilder.Length = 0;
+        var maximumCount = variants.Max(lines => lines.Count);
+        for (var lineIndex = 0; lineIndex < maximumCount; lineIndex++)
+        {
+            var merged = MergeLine(tiers, variants, lineIndex);
+            if (!string.IsNullOrWhiteSpace(merged))
+                originalBuilder.Append(merged + "\n");
+        }
+    }
+#endif
+
     public static bool TryGetTierAttributeValues(
         CardTooltipData tooltipData,
         ECardAttributeType attributeType,
@@ -201,7 +269,8 @@ internal static class CollectionTierTooltipPreview
             return false;
 
         tiers = tierData
-            .Tiers.ToManagedDictionary().Keys.Where(tier => tier >= tooltipData.CardTemplate.StartingTier)
+            .Tiers.ToManagedDictionary()
+            .Keys.Where(tier => tier >= tooltipData.CardTemplate.StartingTier)
             .OrderBy(tier => tier)
             .ToArray();
         return tiers.Count > 0;
@@ -224,8 +293,10 @@ internal static class CollectionTierTooltipPreview
     private static IReadOnlyList<string> SplitLines(StringBuilder builder) =>
         SplitLines(builder.ToString());
 
+#if BPP_ANDROID
     private static IReadOnlyList<string> SplitLines(Il2CppSystem.Text.StringBuilder builder) =>
         SplitLines(builder.ToString());
+#endif
 
     private static IReadOnlyList<string> SplitLines(string text) =>
         text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries)

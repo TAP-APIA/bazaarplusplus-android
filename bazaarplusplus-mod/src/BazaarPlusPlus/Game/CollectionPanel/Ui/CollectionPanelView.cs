@@ -1,9 +1,9 @@
 #nullable enable
-using BazaarPlusPlus.GameInterop;
 using BazaarGameShared.Domain.Core.Types;
 using BazaarPlusPlus.Game.CollectionPanel.Data;
 using BazaarPlusPlus.Game.CollectionPanel.Grid;
 using BazaarPlusPlus.Game.Supporters.Ui;
+using BazaarPlusPlus.GameInterop;
 using BazaarPlusPlus.GameInterop.Fonts;
 using BazaarPlusPlus.GameInterop.TagTypography;
 using BazaarPlusPlus.Infrastructure;
@@ -39,6 +39,9 @@ internal sealed partial class CollectionPanelView : IDisposable
     private NativeGameTypography.PanelScope? _typography;
     private NativeGameTitleOverlay? _titleOverlay;
     private VisualElement? _root;
+    private VisualElement? _content;
+    private Rect _lastContentPixels;
+    private float _lastPixelsPerPoint;
     private Label? _title;
     private VisualElement? _subtitle;
     private Label? _stagingIdCopyLabel;
@@ -140,11 +143,16 @@ internal sealed partial class CollectionPanelView : IDisposable
         var generation = ++_stagingIdCopyFeedbackGeneration;
         _stagingIdCopyLabel.text = $"已复制 {displayName}: {templateId}";
         _stagingIdCopyLabel
-            .schedule.Execute(BppDelegates.Action<TimerState>(_ =>
-            {
-                if (generation == _stagingIdCopyFeedbackGeneration && _stagingIdCopyLabel != null)
-                    _stagingIdCopyLabel.text = StagingIdCopyHint;
-            }))
+            .schedule.Execute(
+                BppDelegates.Action<TimerState>(_ =>
+                {
+                    if (
+                        generation == _stagingIdCopyFeedbackGeneration
+                        && _stagingIdCopyLabel != null
+                    )
+                        _stagingIdCopyLabel.text = StagingIdCopyHint;
+                })
+            )
             .StartingIn(2500);
     }
 
@@ -206,8 +214,10 @@ internal sealed partial class CollectionPanelView : IDisposable
         _root.style.display = DisplayStyle.None;
         _typography.Apply(_root);
         _root.pickingMode = PickingMode.Position;
+        _root.style.backgroundColor = Colors.CollectionPanelBackground;
 
         BuildTree(_root);
+        ApplyViewport();
         _titleOverlay.Attach(_title!);
 
         _gridViewport?.RegisterCallback<GeometryChangedEvent>(
@@ -255,6 +265,7 @@ internal sealed partial class CollectionPanelView : IDisposable
 
     public void TickOpacity(float deltaSeconds)
     {
+        ApplyViewport();
         if (_root == null || deltaSeconds <= 0f)
             return;
         TickSearchFocusPulse(deltaSeconds);
@@ -672,6 +683,9 @@ internal sealed partial class CollectionPanelView : IDisposable
         _typography = null;
         _titleOverlay = null;
         _root = null;
+        _content = null;
+        _lastContentPixels = default;
+        _lastPixelsPerPoint = 0f;
         _searchFrame = null;
         _searchField = null;
         _searchPlaceholderLabel = null;
@@ -709,4 +723,24 @@ internal sealed partial class CollectionPanelView : IDisposable
         && Mathf.Approximately(left.y, right.y)
         && Mathf.Approximately(left.width, right.width)
         && Mathf.Approximately(left.height, right.height);
+
+    private void ApplyViewport()
+    {
+#if BPP_ANDROID
+        if (_root == null || _content == null)
+            return;
+        var pixels = AndroidOverlayViewport.ContentPixels;
+        var ppp = _root.scaledPixelsPerPoint;
+        if (ppp <= 0f)
+            return;
+        if (pixels == _lastContentPixels && Mathf.Approximately(ppp, _lastPixelsPerPoint))
+            return;
+        _lastContentPixels = pixels;
+        _lastPixelsPerPoint = ppp;
+        _content.style.marginLeft = pixels.xMin / ppp;
+        _content.style.marginRight = (Screen.width - pixels.xMax) / ppp;
+        _content.style.marginTop = (Screen.height - pixels.yMax) / ppp;
+        _content.style.marginBottom = pixels.yMin / ppp;
+#endif
+    }
 }

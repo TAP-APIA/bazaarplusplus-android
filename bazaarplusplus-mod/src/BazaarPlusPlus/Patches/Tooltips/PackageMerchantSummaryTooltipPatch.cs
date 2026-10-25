@@ -1,8 +1,5 @@
 #nullable enable
 #pragma warning disable CS0436
-#if !BPP_ANDROID
-using System.Text;
-#endif
 using BazaarGameShared.Domain.Cards;
 using BazaarPlusPlus.GameInterop.Cards;
 using BazaarPlusPlus.GameInterop.StaticCards;
@@ -10,6 +7,9 @@ using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
 using HarmonyLib;
 using TheBazaar.Tooltips;
+#if !BPP_ANDROID
+using System.Text;
+#endif
 
 namespace BazaarPlusPlus.Patches.Tooltips;
 
@@ -18,27 +18,19 @@ namespace BazaarPlusPlus.Patches.Tooltips;
 // tooltip string. The native renderer, enchant-preview section host, and layout system then consume
 // the complete block in their normal order.
 //
-// Android IL2CPP projects this method as Il2CppSystem.ValueTuple<Il2CppSystem.Text.StringBuilder,
-// Il2CppSystem.Nullable<TheBazaar.Tooltips.TooltipSegment>>, so the postfix names that tuple instead
-// of the managed one - a mismatch here is an ABI mismatch, not a missing capability. The tuple is
-// far wider than 16 bytes (its Item2 embeds the whole TooltipSegment), so libil2cpp returns it
-// through the hidden return buffer, which Il2CppDetourMethodPatcher already implements on
-// non-Windows 64-bit processes (Il2CppInterop.HarmonySupport 1.5.3,
-// Il2CppDetourMethodPatcher.IsReturnBufferNeeded: size > 16). Appending into __result.Item1 edits
-// the StringBuilder the caller receives; the detour copies the boxed tuple's bytes back afterwards,
-// which is why __result is taken by value here and never replaced.
-//
-// No manual pointer work is done here on purpose: Il2CppClassPointerStore.GetNativeClassPointer and
-// il2cpp_object_unbox are only needed to re-derive the tuple's value size or to unbox it by hand,
-// and their boxed-vs-unboxed convention for this tuple is 待真机验证. Reading the projected Item1
-// property keeps the postfix on the same accessor path as the rest of the port.
+// Android projects a large reference-bearing ValueTuple return. Recognizing its size does not
+// establish ARM64 return-buffer compatibility; keep the native method unpatched on that platform.
 [HarmonyPatch(typeof(CardTooltipData), nameof(CardTooltipData.GetPassiveTooltipBlock))]
 internal static class PackageMerchantSummaryTooltipPatch
 {
-    // 待真机验证: neither the arm64 detour ABI nor the in-place append can be observed off device.
-    // The first successful append logs one `applied` event per process; a package tooltip that still
-    // shows no summary while `applied` fired means the caller read its pre-detour buffer, and a
-    // summary that never appears while `degraded` reports a reason_code means resolution failed.
+#if BPP_ANDROID
+    // Shares the large tuple return with CollectionTierPassiveTooltipPatch. Do not
+    // install either detour until ARM64 return-buffer marshalling is supported.
+    [HarmonyPrepare]
+    private static bool Prepare() => false;
+#endif
+
+    // The first successful append logs one applied event per process.
     [HarmonyPostfix]
     [HarmonyPriority(Priority.Normal)]
     private static void Postfix(

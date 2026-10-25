@@ -145,6 +145,13 @@ internal sealed class InspectionVariantBar : IDisposable
         return _root.rect.size;
     }
 
+    internal void FitWidth(float availablePixels)
+    {
+        var width = Mathf.Max(1f, Mathf.Min(VariantBarWidth, availablePixels));
+        if (!Mathf.Approximately(_root.sizeDelta.x, width))
+            _root.sizeDelta = new Vector2(width, _root.sizeDelta.y);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -323,12 +330,7 @@ internal sealed class InspectionVariantBar : IDisposable
         private readonly TextMeshProUGUI _text;
         private readonly Color _accent;
 
-        public Chip(
-            RectTransform rect,
-            Image background,
-            TextMeshProUGUI text,
-            Color accent
-        )
+        public Chip(RectTransform rect, Image background, TextMeshProUGUI text, Color accent)
         {
             _rect = rect;
             _background = background;
@@ -361,7 +363,8 @@ internal sealed class InspectionVariantBar : IDisposable
     {
         private readonly NativeGameTypography.OwnedTextPreparation _preparation;
 
-        public FontScope(NativeGameTypography.OwnedTextPreparation preparation) => _preparation = preparation;
+        public FontScope(NativeGameTypography.OwnedTextPreparation preparation) =>
+            _preparation = preparation;
 
         public void Apply(TextMeshProUGUI text) => _preparation.Apply(text);
 

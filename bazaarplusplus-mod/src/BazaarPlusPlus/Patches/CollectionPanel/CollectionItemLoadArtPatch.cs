@@ -119,7 +119,7 @@ internal static class CollectionItemLoadArtPatch
                 : await cacheSession.ArtCache.Get(artKey);
             acquiredNewArtRef = needsNewRef && assetData != null;
             acquiredArtKey = acquiredNewArtRef ? artKey : null;
-            if (instance == null)
+            if (instance == null || marker == null)
             {
                 if (acquiredNewArtRef)
                 {
@@ -135,14 +135,33 @@ internal static class CollectionItemLoadArtPatch
                     cacheSession.ArtCache.Release(artKey);
                     acquiredNewArtRef = false;
                 }
-                if (needsNewRef)
-                    ClearCachedMaterialAssignment(instance, marker);
+                ClearCachedMaterialAssignment(instance, marker);
                 // Split so the log names whether the SO never arrived (cache suppression or a
                 // failed Addressables load) or the SO is present but ships no material.
                 cacheSession.ArtCache.ReportDegraded(
                     assetData == null
                         ? CollectionPanelLogReasonCode.ArtAssetMissing
                         : CollectionPanelLogReasonCode.CardMaterialMissing,
+                    artKey,
+                    null
+                );
+                return;
+            }
+
+            // Check artTexture before material generation or visual assignment. The material samples
+            // this texture: a null mainTexture causes a white quad on screen, so fail early and clear
+            // any stale texture rather than leaving a blank card.
+            var artTexture = assetData.cardMaterial.mainTexture;
+            if (artTexture == null)
+            {
+                if (acquiredNewArtRef)
+                {
+                    cacheSession.ArtCache.Release(artKey);
+                    acquiredNewArtRef = false;
+                }
+                ClearCachedMaterialAssignment(instance, marker);
+                cacheSession.ArtCache.ReportDegraded(
+                    CollectionPanelLogReasonCode.CardTextureMissing,
                     artKey,
                     null
                 );
@@ -162,10 +181,26 @@ internal static class CollectionItemLoadArtPatch
                     cacheSession.ArtCache.Release(artKey);
                     acquiredNewArtRef = false;
                 }
-                if (needsNewRef)
-                    ClearCachedMaterialAssignment(instance, marker);
+                ClearCachedMaterialAssignment(instance, marker);
                 cacheSession.ArtCache.ReportDegraded(
                     CollectionPanelLogReasonCode.MaterialMissing,
+                    artKey,
+                    null
+                );
+                return;
+            }
+
+            var cardImage = instance._cardImage;
+            if (cardImage == null)
+            {
+                if (acquiredNewArtRef)
+                {
+                    cacheSession.ArtCache.Release(artKey);
+                    acquiredNewArtRef = false;
+                }
+                ClearCachedMaterialAssignment(instance, marker);
+                cacheSession.ArtCache.ReportDegraded(
+                    CollectionPanelLogReasonCode.CardImageMissing,
                     artKey,
                     null
                 );
@@ -193,44 +228,12 @@ internal static class CollectionItemLoadArtPatch
 
             instance._cardMaterial = material;
             marker.CardMaterialOwnedByCache = true;
-            // CardPreviewBase._cardImage is a RawImage, not an Image: the material shades the
-            // quad but the RawImage draws whatever texture it holds, and our replacement of the
-            // native UpdateCardImageMaterial step never assigned one. A pooled card therefore kept
-            // the previous item's texture, or drew nothing (the white card face) when the slot was
-            // empty — the long-run white block this guards against. Assign both, but never write a
-            // null texture over one the slot already holds.
-            var cardImage = instance._cardImage;
-            var artTexture = assetData.cardMaterial.mainTexture;
-            if (cardImage == null)
-            {
-                // No RawImage slot means neither texture nor material can reach the screen. Report
-                // it instead of returning as if the card had been dressed.
-                cacheSession.ArtCache.ReportDegraded(
-                    CollectionPanelLogReasonCode.CardImageMissing,
-                    artKey,
-                    null
-                );
-            }
-            else
-            {
-                // Assign the texture only when the SO actually carries one: writing a null
-                // mainTexture would erase a texture the slot may already hold (the native path may
-                // have set a valid one), and the material alone still shades the quad.
-                if (artTexture != null)
-                    cardImage.texture = artTexture;
-                cardImage.material = material;
-            }
+
+            // CardPreviewBase._cardImage is a RawImage: assign the validated non-null texture
+            // and the shared material together, then commit visualsAssigned.
+            cardImage.texture = artTexture;
+            cardImage.material = material;
             visualsAssigned = true;
-            if (artTexture == null)
-            {
-                // The SO loaded but its material has no texture to sample: the card will stay
-                // blank even after this path succeeds, so say so instead of looking healthy.
-                cacheSession.ArtCache.ReportDegraded(
-                    CollectionPanelLogReasonCode.CardTextureMissing,
-                    artKey,
-                    null
-                );
-            }
 
             instance._gemGroupController?.Initialize(instance._clientCard);
 
@@ -241,7 +244,7 @@ internal static class CollectionItemLoadArtPatch
         {
             if (acquiredNewArtRef && !committedNewArtRef && !string.IsNullOrEmpty(acquiredArtKey))
                 cacheSession.ArtCache.Release(acquiredArtKey!);
-            var degradedArtKey = acquiredArtKey ?? marker.CurrentArtKey;
+            var degradedArtKey = acquiredArtKey ?? marker?.CurrentArtKey;
             // A failure before the visual fields were settled leaves the pooled card showing the
             // previous item's texture/material. Clear both halves so the next Show cannot draw
             // stale art. Best-effort like the release above: the component may have been destroyed
@@ -250,8 +253,7 @@ internal static class CollectionItemLoadArtPatch
             {
                 try
                 {
-                    if (instance != null)
-                        ClearCachedMaterialAssignment(instance, marker);
+                    ClearCachedMaterialAssignment(instance, marker);
                 }
                 catch
                 {
@@ -267,25 +269,49 @@ internal static class CollectionItemLoadArtPatch
     }
 
     private static void ClearCachedMaterialAssignment(
-        CardPreviewItem instance,
-        CollectionPanelOwnedMarker marker
+        CardPreviewItem? instance,
+        CollectionPanelOwnedMarker? marker
     )
     {
-        if (!marker.CardMaterialOwnedByCache && instance._cardMaterial != null)
+        if (marker != null && instance != null)
         {
-            Object.Destroy(instance._cardMaterial);
+            try
+            {
+                if (!marker.CardMaterialOwnedByCache && instance._cardMaterial != null)
+                {
+                    Object.Destroy(instance._cardMaterial);
+                }
+            }
+            catch
+            {
+                // best-effort
+            }
         }
 
-        instance._cardMaterial = null!;
-        if (instance._cardImage != null)
+        if (instance != null)
         {
-            // Clear both halves: the card is about to be pooled and re-bound to another artKey, and
-            // a texture left behind would draw the previous item's art.
-            instance._cardImage.texture = null;
-            instance._cardImage.material = null;
+            try
+            {
+                instance._cardMaterial = null!;
+                var cardImage = instance._cardImage;
+                if (cardImage != null)
+                {
+                    // Clear both halves: the card is about to be pooled and re-bound to another artKey, and
+                    // a texture left behind would draw the previous item's art.
+                    cardImage.texture = null;
+                    cardImage.material = null;
+                }
+            }
+            catch
+            {
+                // best-effort
+            }
         }
-        marker.CardMaterialOwnedByCache = false;
 
-        marker.ReleaseCurrentArtKey();
+        if (marker != null)
+        {
+            marker.CardMaterialOwnedByCache = false;
+            marker.ReleaseCurrentArtKey();
+        }
     }
 }

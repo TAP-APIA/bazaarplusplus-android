@@ -45,6 +45,7 @@ Each of these failed silently, or reported something misleading, at least once.
 - `PublicizeAll` makes `ConfigEntry<T>.SettingChanged` ambiguous (CS0229), so no BPP code subscribes to it; invalidate config-derived caches by raw-value compare. [`src/BazaarPlusPlus/Game/Input/BppHotkeyService.cs`]
 - Portrait providers negative-cache exceptions past their service-readiness gates, so one transient asset-load exception caches a null portrait until restart. Preserved by design through the `AsyncLoadCache` migration — changing it is a behavior change. [`src/BazaarPlusPlus/GameInterop/HeroPortraits/`]
 - `AssetLoader` signatures vary by game build; route them through `NativeAssetLoaderInvocation`. Process-static caches must load `Global` because scene-scope handles die across lobby↔run; smoke native cards and hero chips across that transition. [`src/BazaarPlusPlus/GameInterop/AssetLoading/`]
+- A Harmony postfix whose `__result` is a reference-bearing struct wider than 16 bytes (`CardTooltipData.GetPassiveTooltipBlock` returns `ValueTuple<StringBuilder, TooltipSegment?>`) SIGSEGVs ARM64 IL2CPP at the first card tooltip: the detour's return-buffer copy hands the postfix non-pointer data that it dereferences. Keep every such postfix behind `[HarmonyPrepare] => false` under `BPP_ANDROID`. [`src/BazaarPlusPlus/Patches/CollectionPanel/CollectionTierTooltipPatch.cs` | `src/BazaarPlusPlus/Patches/Tooltips/PackageMerchantSummaryTooltipPatch.cs`]
 
 ### Build and tests
 

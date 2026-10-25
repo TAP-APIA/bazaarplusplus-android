@@ -1,5 +1,4 @@
 #nullable enable
-using BazaarPlusPlus.GameInterop;
 using System.Collections;
 using BazaarGameShared.Domain.Core.Types;
 using BazaarPlusPlus.Core.Config;
@@ -12,6 +11,7 @@ using BazaarPlusPlus.Game.CollectionPanel.Ui;
 using BazaarPlusPlus.Game.Input;
 using BazaarPlusPlus.Game.OverlayPanels;
 using BazaarPlusPlus.Game.Supporters;
+using BazaarPlusPlus.GameInterop;
 using BazaarPlusPlus.GameInterop.CardPreview;
 using BazaarPlusPlus.GameInterop.DayTiers;
 using BazaarPlusPlus.GameInterop.StaticCards;
@@ -64,6 +64,7 @@ internal sealed class CollectionPanel
             BppStartupTrace.Write("toggle:open " + opened);
         }
     }
+
     internal static CollectionPanel? Instance => _instance;
 
     private CollectionCatalog _catalog = null!;
@@ -402,6 +403,7 @@ internal sealed class CollectionPanel
             ? new CollectionPanelLoadDiagnostics()
             : null;
         EnsureView();
+        _artCache?.ClearFailedKeys();
         if (firstViewConstruction)
             openPrologueDiagnostics!.Complete(
                 CollectionPanelLoadPhase.OpenPrologue,
@@ -661,8 +663,8 @@ internal sealed class CollectionPanel
 
     private void DisposeRuntime()
     {
-        DisposeUnityRuntime();
         InvalidateCatalog(CollectionPanelLogReasonCode.RuntimeDispose);
+        DisposeUnityRuntime();
     }
 
     private void DisposeUnityRuntime()
@@ -762,11 +764,7 @@ internal sealed class CollectionPanel
             return;
         }
 
-        _view = new CollectionPanelView(
-            Root,
-            new PanelCommands(this),
-            _stagingItemIdCopyEnabled
-        );
+        _view = new CollectionPanelView(Root, new PanelCommands(this), _stagingItemIdCopyEnabled);
 
         _view.GridViewportBoundsChanged += bounds =>
         {
