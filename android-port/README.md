@@ -1,109 +1,131 @@
-# BazaarPlusPlus Android 预览版
+# BazaarPlusPlus Android 一体化预览版
 
-通过独立 BepInEx Launcher 加载插件，不修改游戏 APK。下载入口：
-<https://github.com/TAP-APIA/bazaarplusplus-android/releases>。
-这是 Android ARM64 预览版，不是桌面安装器，也不代表所有桌面功能已移植。
+一个 APK 同时包含 BepInEx Launcher、.NET / BepInEx 运行环境、Android SQLite 和 BPP 模组包。
+安装后首次打开会自动部署或更新，不再需要单独下载 `bpp-modpack.zip`、解压或用电脑 ADB 推送。
+游戏本体仍需自行安装，本应用不修改游戏 APK。
 
-## Release 附件
+<https://github.com/TAP-APIA/bazaarplusplus-android/releases>
 
-| 文件 | 用途 |
-| --- | --- |
-| BepInExLauncher-bpp-android.apk | 已在平板验证的启动器，保留原始 native 库，使用测试用 Android Debug 证书签名。 |
-| bpp-modpack.zip | 插件及依赖、Android SQLite、完整 BepInEx core 和修补的 Runtime / ARM64 HarmonySupport；不含配置或用户数据。 |
-| install-to-device.ps1 | Windows PowerShell 部署脚本，同时更新 modpack 源和实际运行目录。 |
-| DEPLOYMENT-zh-CN.md | 本说明的离线副本。 |
-| SHA256SUMS.txt | 下载文件的 SHA-256 校验值。 |
+## 安装与更新
 
-游戏本体需自行安装，Release 不包含游戏、账号、配置、历史库、签名私钥或视频素材。
-运行部署包不需要 .NET SDK；从源码重建才需要。
-
-## 安装与更新（Windows + ADB）
-
-1. 安装 Android SDK Platform-Tools，将 `adb` 放入 PATH，开启设备 USB 调试或无线调试。
-   用 `adb devices -l` 确认设备在线；无线调试先按设备提示配对，再 `adb connect IP:连接端口`。
-2. 将上述附件放在同一目录，解压 `bpp-modpack.zip` 到该目录的 `bpp-modpack/`，
-   确保其下直接是 `modpack.json`、`plugins/`、`core/`，而不是再套一层目录。
-3. 首次安装启动器，或覆盖更新：
-
+1. 下载 `BepInExLauncher-bpp-android.apk`。
+2. 在同一台设备上覆盖安装；vivo 若提示同版本，选择“重新安装”。
    ```powershell
    adb -s <设备ID> install -r .\BepInExLauncher-bpp-android.apk
    ```
+3. 打开 **BPP Android**。首次启动会自动解包运行环境并部署内置模组；进度完成后点击
+   **启动 The Bazaar（BPP 模组）**。
+4. 更新时直接覆盖安装新 APK。不要卸载、不要清除应用数据；`adb install -r` 会保留应用数据。
+   若出现 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，说明新 APK 的签名与设备上已安装版本不同：
+   停止更新，先备份，不能靠卸载绕过。
+5. 旧版本遗留的 `BepInEx/config`、`modpacks/bpp/config`、`BazaarPlusPlusV6` 历史库和入口位置
+   会继续沿用；新版本只更新插件与修补运行时。
 
-   vivo 若询问同版本重新安装，确认覆盖。**不要卸载启动器，也不要清除其应用数据。**
-   若出现 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，说明现有签名不同：停止更新，先保留原安装并备份数据，
-   不能靠卸载解决。Debug 签名仅用于当前预览版，不作为正式生产签名。
-4. 在启动器授予其请求的文件访问权限，添加/选择已安装的 The Bazaar，启动一次以创建目录，再退出。
-5. 在附件目录运行（脚本会停止启动器后更新，不删除配置或历史）：
+安装后的主界面提供：
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-to-device.ps1 -DeviceId <设备ID>
-   ```
+- **启动 The Bazaar（BPP 模组）**：自动确保内置模组已就绪后启动游戏。
+- **重新校验 / 修复模组**：重新校验全部内置文件；损坏或缺失时自动恢复。游戏进程运行时
+  会先停止 `:game` 进程再修复。
+- **打开原版高级启动器**：保留原 BepInEx Launcher 的模组管理、日志等高级功能。
 
-   多设备时必须指定 `-DeviceId`；`-Adb <adb.exe完整路径>` 可指定工具位置。
-   `-WhatIf` 仅检查前置条件并显示目标，不停止应用、不写设备。
-   旧启动器若确实使用共享存储目录，显式传 `-StorageRoot /sdcard/BepInEx_Android`；
-   不要同时向多个猜测路径复制。默认目录不存在时脚本会停止并提示。
-6. 重新打开启动器，选择 The Bazaar 和 **bpp** 模组包，再启动游戏。
-
-默认游戏目录（部署脚本的 `StorageRoot` 参数是其上一级）：
+## 部署目录
 
 ```text
 /sdcard/Android/data/com.bepinex.android/files/BepInEx_Android/com.tempogames.thebazaar/
   modpacks/bpp/modpack.json
-  modpacks/bpp/plugins/
-  modpacks/bpp/core/
-  BepInEx/plugins/
-  BepInEx/core/
+  modpacks/bpp/plugins/        ← 内置 BPP 插件与依赖
+  modpacks/bpp/core/           ← 修补的 Il2CppInterop Runtime / HarmonySupport
+  modpacks/bpp/config/         ← 只新增或补齐，不改用户配置
+  modpacks/bpp/logs/
+  BepInEx/plugins/             ← 自动同步的当前运行插件
+  BepInEx/core/                ← 自动同步的当前运行核心
+  BepInEx/config/              ← 用户配置，更新时保留
+  BepInEx/LogOutput.log
 ```
 
-启动器会把所选 modpack 应用到运行目录，所以只更新其中一份不够。
-Android 文件管理器可能无法访问 `Android/data`；推荐使用上述 ADB 脚本。
+旧启动器若使用共享存储目录，升级到本 APK 后仍以应用专属目录为准；请先备份旧目录。
 
-## 使用与验证
+## 数据安全边界
 
-- 触屏入口为深色金边竖排 BPP / 配装 / 图鉴 / 历史。长按 BPP 后拖动可移动整条入口，位置随配置保存。
-  任一 BPP 面板打开期间入口隐藏，关闭后恢复；面板使用整屏安全区，不预留右侧黑缝。
-- UI 默认跟随游戏语言，游戏未保存语言时回落系统语言。可在 `BepInEx/config/BazaarPlusPlus.cfg`
-  的 `[Localization] UiLanguage` 设为 `Chinese` 或 `English`，默认 `Auto`。
+内置安装器只拥有以下文件：
+
+- `modpacks/bpp/modpack.json`：首次创建；已有合法文件时只更新 `modCount`，保留 `mods` 等用户字段。
+- 清单中列出的 `plugins/**` 与 `core/**` 文件：写入 `modpacks/bpp/` 和 `BepInEx/` 各一份。
+- 更新时只删除上一版清单拥有、且内容仍与上一版哈希一致的文件；用户改过或第三方文件不动。
+- `.cfg` 只做缺失补齐和已有配置同步，不覆盖已有内容；`BazaarPlusPlusV6` 历史库不读取、不写入、不删除。
+
+整个安装先解压到私有暂存目录并逐文件校验大小与 SHA-256，全部通过后才写入目标位置；
+每个文件使用临时文件 + 原子替换。安装完成标记只有在校验全部通过后写入；中途失败会保持
+“未完成”状态，下次打开或修复时重试，且不会启动游戏。进程内锁和文件锁防止重复安装。
+
+## 使用说明
+
+- 触屏入口为深色金边竖排 BPP / 配装 / 图鉴 / 历史。长按 BPP 后拖动可移动整条入口，位置随
+  `BepInEx/config/BazaarPlusPlus.cfg` 保存。任一 BPP 面板打开时入口隐藏，关闭后恢复。
+- UI 默认跟随游戏语言，游戏未保存语言时回落系统语言。可在 `[Localization] UiLanguage`
+  强制 `Chinese` / `English` / `German` / `Portuguese` / `Korean` / `Italian`。
 - 图鉴可检视卡牌、切换品质；说明层位于抽屉背景之上，保留原生滚动与遮罩。
 - 十胜阵容页点击更新应成功；无进行中对局时推荐为 0/0，不等于阵容库下载失败。
-  语料日期保留远端真实生成时间。
-- 日志位于上述默认游戏目录的 `BepInEx/LogOutput.log`。检查
-  `plugin.initialization.succeeded`、`plugin.android.tls.registered`，以及
-  `live_build_panel.corpus.ready` / `live_build_panel.corpus.recovered`。
-  正常证书验证仍启用，不需要关闭 SSL 验证或手工导入阵容缓存。
+- 日志：上述目录的 `BepInEx/LogOutput.log`。正常启动包含
+  `plugin.initialization.succeeded`、`plugin.android.tls.registered` 和
+  `live_build_panel.corpus.ready` / `recovered`。
 
-本轮在 vivo iPA2375 / Android 15 实测：远端取得 5,689 套阵容，手动刷新成功，冷启动读取缓存成功；
-严格拒绝证书的临时反向探针确认请求确实被拒绝，探针已从发布代码移除。
-Android 条件纯行为测试 228/228，默认条件 221/221；Android 构建 0 错误、95 个现有警告。
-完整桌面架构门禁未通过，不能据此宣称全项目验收通过。
+## 从源码构建
 
-## 已知限制
+前置条件：
 
-- 暂停语音回调、图鉴原生品质/附魔控制、被动描述多品质合并、升级数值元组改写、包裹商人摘要；
-  原生描述保留，BPP 自有检视品质选择可用。大元组返回值的 Harmony detour 会触发 ARM64 崩溃，不能强行启用。
-- 同一卡牌刚关闭后立即再次点击可能遇到空 `CurrentTooltipData`；切换另一张卡后可继续检视。
-- 历史与本地回放有前轮实机覆盖，但上传、账号链接、Ghost 在线同步、MP4 录制及回放重复进入未完整验收。
-  Android 回放自动清理仍关闭。本轮演示平板没有历史记录，不把空界面视为完整回放验收。
-- 游戏更新可能使 IL2CPP 接口失效；问题及验证证据见
-  <https://github.com/TAP-APIA/bazaarplusplus-android/issues/15>。
+- JDK 17（Android Studio 自带 JBR 可用）、Android SDK Build-Tools、`android.jar`；
+- Python 3.11；
+- .NET SDK；
+- 与游戏版本匹配的 Android IL2CPP 代理程序集目录；
+- 已验证的基线启动器 `dist/app-bpp-fixed.apk`，以及修补后的
+  `safe_Il2CppInterop.Runtime.dll`、`safe_Il2CppInterop.HarmonySupport.dll`。
 
-## 从源码重建
-
-从仓库根目录执行，`<Android代理程序集目录>` 需由匹配游戏版本的 IL2CPP 工具链生成，不随 Release 分发：
+先编译 Android 插件：
 
 ```powershell
-dotnet build bazaarplusplus-mod/src/BazaarPlusPlus/BazaarPlusPlus.csproj -c Debug -p:BppAndroid=true -p:ManagedPath=<Android代理程序集目录> -p:NuGetAudit=false -p:TreatWarningsAsErrors=false
-.\android-port\package-modpack.ps1 -Zip
+dotnet build .\bazaarplusplus-mod\src\BazaarPlusPlus\BazaarPlusPlus.csproj -c Debug `
+  -p:BppAndroid=true -p:ManagedPath=<Android代理程序集目录> `
+  -p:NuGetAudit=false -p:TreatWarningsAsErrors=false
 ```
 
-`package-modpack.ps1` 的参数可指定编译输出、代理快照、原始启动器 APK、修补 Runtime / HarmonySupport 和目标目录；
-这些输入必须自行准备。`android-port/tools/` 保存运行时补丁与托管 codec 打包工具。
-`package-launcher.ps1` 是早期本地重签脚本，仍有机器专用路径，**不是本 Release 的安装入口**。
-本次直接分发已验证 APK，不调用它重新签名。
+再生成一体化 APK：
 
-### 不要修改 libpine
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launcher.ps1 -VersionCode 3
+```
+
+脚本会依次调用 `package-modpack.ps1` 生成最新模组包、编译并运行安装器与 manifest 单元测试、
+生成 `classes3.dex`、重写二进制 manifest、嵌入模组清单与 ZIP、进行 16 KB 对齐和同证书签名，
+最后逐项校验基线的 native 库、DEX 与资源未被改动。
+
+- `-ModpackZip` 可指定现成 ZIP，跳过重新打包。
+- `-KeyStore` / `-KeyAlias` 可改用正式签名；默认使用
+  `%USERPROFILE%\.android\debug.keystore` 的 `androiddebugkey`。
+- `-VersionCode` 每次发布必须递增；默认输出 `dist/BepInExLauncher-bpp-android.apk`。
+- `-UnsignedOnly` 只生成对齐后的未签名 APK。
+
+发布时只需上传 APK、本说明和 SHA-256；不要再附带单独的模组 ZIP 或 ADB 部署脚本。
+
+## 不要修改 libpine
 
 `lib/arm64-v8a/libpine.so` 的 `Pine_init0` 若被改成直接 `ret`，会使 `Pine.arch` 未初始化，
 在 `ClassLoaderHooks.installHooks` 报 `Unexpected arch 0`，游戏无法进入 Unity。
-发布 APK 保留原始 native 库；不要为了启动“修复”而将 `.so` 打桩。
+一体化 APK 保留原始 native 库；打包脚本也会拒绝 `Pine_init0 == ret` 的基线。
+
+## 当前验证与限制
+
+平板（vivo iPA2375 / Android 15）覆盖安装 `versionCode 2 → 3`，未卸载、未清除数据：
+`BepInEx/config/BazaarPlusPlus.cfg` 与 `modpacks/bpp/config/BazaarPlusPlus.cfg` 哈希前后一致；
+`modpack.json` 的 `createdAt` 保留；插件两份哈希一致；游戏启动日志包含
+`plugin.initialization.succeeded`，远端阵容库恢复 5,689 套。
+
+Android 纯行为测试 228/228、默认条件 221/221；新增安装器 Java 测试覆盖首次安装、升级、
+配置/历史/第三方文件保留、损坏修复、路径穿越/未列出条目/哈希不符拒绝、未完成状态重试；
+manifest 测试覆盖启动 Activity 迁移、原高级界面保留和版本号；打包脚本内置 APK 完整性校验。
+
+仍未完整验收：上传/账号链接/Ghost 在线同步/MP4 录制/回放重复进入；Android 回放自动清理仍关闭。
+同卡牌刚关闭后立即再次点击可能遇到空 tooltip，可先切换另一张卡。
+大元组返回值的 Harmony detour 在 ARM64 会崩溃，相关增强保持停用。
+完整桌面架构门禁仍受桌面产物与游戏程序集限制。
+问题与证据：<https://github.com/TAP-APIA/bazaarplusplus-android/issues/17>。
