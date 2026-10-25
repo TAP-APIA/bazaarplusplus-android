@@ -70,6 +70,13 @@ internal sealed class CollectionCardArtCache
     // FailureRetryDelay. Not called per frame: invalidation runs only on locale change or dispose.
     public void ClearFailedKeys() => _failedKeys.Clear();
 
+    public bool ClearFailedKey(string artKey)
+    {
+        if (string.IsNullOrEmpty(artKey))
+            return false;
+        return _failedKeys.Remove(artKey);
+    }
+
     // The storm key is the reason code, so a scroll through many broken art keys writes one line
     // per reason per storm window plus a suppressed count.
     private static void ReportArtDegraded(

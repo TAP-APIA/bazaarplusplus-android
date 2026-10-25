@@ -68,6 +68,7 @@ internal sealed partial class HistoryPanelView : IDisposable
     private Rect _lastBounds;
     private int _layoutFrames = 2;
     private Vector2 _screenSize;
+    private Rect _lastSafeArea;
     private readonly Vector3[] _corners = new Vector3[4];
     private readonly List<(Image Image, int Index, Color Tint)> _art = new();
     private readonly Dictionary<Button, bool> _buttonSelection = new();
@@ -146,7 +147,17 @@ internal sealed partial class HistoryPanelView : IDisposable
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1600, 1000);
         scaler.matchWidthOrHeight = .5f;
+
+        // Full-screen backdrop preventing clicks from falling through on cutout margins.
+        var fullWall = CreateRect("FullModalWall", _root.transform, 0, 0, 1, 1);
+        var fullWallImage = fullWall.gameObject.AddComponent<Image>();
+        fullWallImage.color = new Color(.055f, .038f, .026f, 1);
+        fullWallImage.raycastTarget = true;
+
         CreateLayout();
+        ApplySafeAreaInsets();
+        _lastSafeArea = Screen.safeArea;
+        _screenSize = new Vector2(Screen.width, Screen.height);
         _root.SetActive(_visible);
         UpdateContent();
     }
@@ -257,9 +268,12 @@ internal sealed partial class HistoryPanelView : IDisposable
         }
         UpdateInputFocus();
         var size = new Vector2(Screen.width, Screen.height);
-        if (_screenSize != size)
+        var safeArea = Screen.safeArea;
+        var viewportChanged = ApplySafeAreaInsets();
+        if (_screenSize != size || _lastSafeArea != safeArea || viewportChanged)
         {
             _screenSize = size;
+            _lastSafeArea = safeArea;
             _layoutFrames = 2;
         }
         if (_layoutFrames <= 0 || _preview == null)
@@ -381,7 +395,9 @@ internal sealed partial class HistoryPanelView : IDisposable
         float height
     )
     {
-        var rect = BppGameObjectFactory.Create(name, typeof(RectTransform)).GetComponent<RectTransform>();
+        var rect = BppGameObjectFactory
+            .Create(name, typeof(RectTransform))
+            .GetComponent<RectTransform>();
         rect.SetParent(parent, false);
         Anchor(rect, HistoryPanelLayout.Anchors(x, y, width, height));
         rect.offsetMin = rect.offsetMax = Vector2.zero;
@@ -423,7 +439,8 @@ internal sealed partial class HistoryPanelView : IDisposable
         float height,
         Action click,
         bool selected = false,
-        int size = 17
+        int size = 17,
+        float hitPadding = 0f
     )
     {
         var rect = CreateRect("HistoryAction", parent, x, y, width, height);
@@ -432,11 +449,19 @@ internal sealed partial class HistoryPanelView : IDisposable
         image.type = Image.Type.Sliced;
         image.pixelsPerUnitMultiplier = 2.5f;
         image.color = image.sprite == null ? new Color(.18f, .14f, .1f) : Color.white;
+        if (hitPadding > 0f)
+        {
+            // Negative raycastPadding expands the touch hit target beyond the visual boundaries.
+            image.raycastPadding = new Vector4(-hitPadding, -hitPadding, -hitPadding, -hitPadding);
+        }
         Layer(rect, 0, selected ? Ink : new Color(.65f, .55f, .39f));
         var button = rect.gameObject.AddComponent<Button>();
         button.targetGraphic = image;
         button.onClick.AddListener(() => click());
-        Text(rect, label, .04f, .06f, .92f, .88f, size, Ink, true);
+        var text = Text(rect, label, .04f, .06f, .92f, .88f, size, Ink, true);
+        text.enableAutoSizing = true;
+        text.fontSizeMin = Mathf.Max(12, size - 4);
+        text.fontSizeMax = size;
         _buttonSelection[button] = selected;
         return button;
     }
@@ -464,6 +489,30 @@ internal sealed partial class HistoryPanelView : IDisposable
         text.overflowMode = TextOverflowModes.Ellipsis;
         text.raycastTarget = false;
         return text;
+    }
+
+    private bool ApplySafeAreaInsets()
+    {
+        if (_layout == null || _root == null)
+            return false;
+        var canvas = _root.GetComponent<Canvas>();
+        var scale = canvas != null && canvas.scaleFactor > 0.001f ? canvas.scaleFactor : 1f;
+#if BPP_ANDROID
+        var safe = AndroidOverlayViewport.ContentPixels;
+#else
+        var safe = Screen.safeArea;
+#endif
+        var insetLeft = Mathf.Max(0f, safe.xMin / scale);
+        var insetRight = Mathf.Max(0f, (Screen.width - safe.xMax) / scale);
+        var insetTop = Mathf.Max(0f, (Screen.height - safe.yMax) / scale);
+        var insetBottom = Mathf.Max(0f, safe.yMin / scale);
+        var min = new Vector2(insetLeft, insetBottom);
+        var max = new Vector2(-insetRight, -insetTop);
+        if (_layout.offsetMin == min && _layout.offsetMax == max)
+            return false;
+        _layout.offsetMin = min;
+        _layout.offsetMax = max;
+        return true;
     }
 
     public void Dispose()

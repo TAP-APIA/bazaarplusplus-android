@@ -7,6 +7,7 @@ using BazaarPlusPlus.GameInterop.CardPreview;
 using BazaarPlusPlus.GameInterop.Tooltips;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
+using BazaarPlusPlus.Infrastructure.UiTokens;
 using TheBazaar.Tooltips;
 using TheBazaar.UI.Tooltips;
 using UnityEngine;
@@ -41,7 +42,8 @@ internal sealed class CollectionInspectionModule
     {
         var controller = TheBazaar.Data.TooltipParentComponent?.CardTooltipController;
         var data = controller?.CurrentTooltipData.TryCast<CardTooltipData>();
-        var rejection = BlocksInput ? "input_blocked"
+        var rejection =
+            BlocksInput ? "input_blocked"
             : controller == null ? "controller_missing"
             : !controller.isActiveAndEnabled ? "controller_inactive"
             : controller.IsLocked ? "already_locked"
@@ -355,72 +357,54 @@ internal sealed class CollectionInspectionModule
             return;
         var size = _variantBar.Measure();
         var centerX = cardCell.x + cardCell.width * .5f;
-        // Cell rects run top-down from the screen top; the band is placed in screen coordinates.
+        // Cell rects run top-down from the screen top; the band is placed in screen coordinates (bottom-up).
         var cardBottom = Screen.height - (cardCell.y + cardCell.height);
-        var top = Mathf.Max(size.y, cardBottom - VariantBarGap);
+        var safeBottom = Mathf.Max(0f, Screen.safeArea.yMin);
+        var minTop = safeBottom + size.y + 6f;
+        var top = Mathf.Max(minTop, cardBottom - VariantBarGap);
         _variantBar.Root.position = new Vector3(centerX, top, 0f);
     }
 
-    /// <summary>Left edge of the native right-half drawer, or the measured 3096px-tablet split.</summary>
-    private float AndroidDrawerLeft()
+    // Use the native drawer's measured screen edge. Until it is measurable, split the
+    // current safe content evenly; no physical resolution identifies a device class.
+    private float AndroidDrawerLeft(Rect content)
     {
-        // A drawer still parked off-screen (or one that never measured) must not become the split:
-        // that would center the enlarged card on top of the tray.
         if (
             _presentation != null
             && _presentation.TryGetNativeTrayScreenRect(out var tray)
-            && tray.xMin > 1f
-            && tray.xMin < Screen.width * .9f
-            && tray.width > Screen.width * .2f
+            && tray.xMin > content.xMin + content.width * .2f
+            && tray.xMin < content.xMax - content.width * .1f
+            && tray.width > content.width * .2f
         )
             return tray.xMin;
-        return Screen.width * .645f;
+        return content.center.x;
     }
 
-    /// <summary>
-    /// Android inspection layout: the enlarged card owns the left half, centered on it, capped at
-    /// 72% of that half's width and 65% of the screen height.
-    /// </summary>
     private CollectionInspectionLayout AndroidInspectionLayout(
         float visualWidth,
         float visualHeight
     )
     {
-        var left = AndroidDrawerLeft();
-        var width = Mathf.Max(1f, visualWidth);
-        var height = Mathf.Max(1f, visualHeight);
-        var scale = Mathf.Min(left * .72f / width, Screen.height * .65f / height);
-        var cardWidth = width * scale;
-        var cardHeight = height * scale;
-        var centerX = left * .5f;
-        var centerY = Screen.height * .54f;
-        return new CollectionInspectionLayout(
-            centerX - cardWidth * .5f,
-            centerY - cardHeight * .5f,
-            cardWidth,
-            cardHeight,
-            0f,
-            0f,
-            0f,
-            0f,
-            scale,
-            0f
+        var content = AndroidOverlayViewport.ContentPixels;
+        var laneWidth = Mathf.Max(1f, AndroidDrawerLeft(content) - content.xMin);
+        _variantBar?.FitWidth(laneWidth * .95f);
+        var selectorHeight = _variantBar?.Measure().y ?? 0f;
+        return CollectionInspectionLayout.ForDrawer(
+            content.xMin,
+            Screen.height - content.yMax,
+            laneWidth,
+            content.height,
+            visualWidth,
+            visualHeight,
+            selectorHeight,
+            VariantBarGap
         );
     }
 
-    /// <summary>
-    /// Placeholder card band used while the native preview is still loading, so the selector does
-    /// not jump from the top of the screen once the card arrives.
-    /// </summary>
     private Rect AndroidPlaceholderCard()
     {
-        var left = AndroidDrawerLeft();
-        return new Rect(
-            left * .14f,
-            Screen.height * .34f,
-            left * .72f,
-            Screen.height * .40f
-        );
+        var layout = AndroidInspectionLayout(300f, 500f);
+        return new Rect(layout.CardX, layout.CardY, layout.CardWidth, layout.CardHeight);
     }
 #endif
 
@@ -428,14 +412,21 @@ internal sealed class CollectionInspectionModule
     /// Vertical gap between the description and the selector, scaled to the viewport so the band
     /// stays tactile on a phone without drifting off a tablet's larger screen.
     /// </summary>
-    private static float VariantBarGap => Mathf.Clamp(Screen.height * .014f, 10f, 26f);
+    private static float VariantBarGap =>
+#if BPP_ANDROID
+        AndroidOverlayViewport.Read().TouchScale * 8f;
+#else
+        Mathf.Clamp(Screen.height * .014f, 10f, 26f);
+#endif
 
     private void RefreshLayout(float dt)
     {
         if (_presentation == null)
             return;
+#if !BPP_ANDROID
         if (_card != null && _cardAnchor.NeedsLayout(Screen.width, Screen.height))
             _bounds.InvalidateOnScaleDirty();
+#endif
         if (_card != null && !_bounds.IsValid)
         {
             if (!_measurementPending)
@@ -514,7 +505,16 @@ internal sealed class CollectionInspectionModule
         _presentation.PositionDescription(layout.DetailCenterX, layout.DetailCenterY, layout.Scale);
         PositionVariantBar();
 #endif
+#if BPP_ANDROID
+        var placement = new CollectionInspectionCardPlacement(
+            layout.CardX,
+            layout.CardY,
+            layout.CardWidth,
+            layout.CardHeight
+        );
+#else
         var placement = _cardAnchor.Resolve(Screen.width, Screen.height, layout);
+#endif
         _animation = Mathf.Min(1f, _animation + dt / .25f);
         var progress = 1f - Mathf.Pow(1f - _animation, 3f);
         var target = new Rect(placement.X, placement.Y, placement.Width, placement.Height);

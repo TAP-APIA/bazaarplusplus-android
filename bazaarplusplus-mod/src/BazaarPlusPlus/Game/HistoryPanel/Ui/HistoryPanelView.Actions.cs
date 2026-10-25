@@ -1,7 +1,7 @@
 #nullable enable
+using BazaarPlusPlus.Game.HistoryPanel.Data;
 using BazaarPlusPlus.GameInterop;
 using BazaarPlusPlus.Infrastructure;
-using BazaarPlusPlus.Game.HistoryPanel.Data;
 using BazaarPlusPlus.Infrastructure.UiTokens;
 using TMPro;
 using UnityEngine;
@@ -51,9 +51,20 @@ internal sealed partial class HistoryPanelView
             .045f,
             () => SetMoreVisible(!_moreVisible)
         );
-        _deleteButton = Button(_layout!, "", .04f, .90f, .16f, .044f, _delete);
-        _recordButton = Button(_layout!, "", .58f, .90f, .13f, .055f, _record);
-        _replayButton = Button(_layout!, "", .72f, .90f, .23f, .055f, _replay, true, 23);
+        _deleteButton = Button(_layout!, "", .04f, .895f, .16f, .050f, _delete, hitPadding: 10f);
+        _recordButton = Button(_layout!, "", .555f, .895f, .165f, .055f, _record, hitPadding: 12f);
+        _replayButton = Button(
+            _layout!,
+            "",
+            .725f,
+            .895f,
+            .225f,
+            .055f,
+            _replay,
+            true,
+            22,
+            hitPadding: 12f
+        );
         CreateFavoriteControls();
         var shade = CreateRect("HistoryMoreDialog", _layout!, 0, 0, 1, 1);
         var canvas = shade.gameObject.AddComponent<Canvas>();
@@ -123,16 +134,21 @@ internal sealed partial class HistoryPanelView
         input.placeholder = placeholder;
         input.lineType = TMP_InputField.LineType.SingleLine;
         input.characterLimit = 10;
-        input.onValidateInput = BppDelegates.OnValidateInput((_, _, character) =>
-            char.IsWhiteSpace(character) ? '\0' : character);
-        input.onValueChanged.AddListener(BppDelegates.UnityAction<string>(value => _accountCode = value));
+        input.onValidateInput = BppDelegates.OnValidateInput(
+            (_, _, character) => char.IsWhiteSpace(character) ? '\0' : character
+        );
+        input.onValueChanged.AddListener(
+            BppDelegates.UnityAction<string>(value => _accountCode = value)
+        );
         input.onSelect.AddListener(BppDelegates.UnityAction<string>(_ => UpdateInputFocus()));
         input.onDeselect.AddListener(BppDelegates.UnityAction<string>(_ => ReleaseInputFocus()));
-        input.onSubmit.AddListener(BppDelegates.UnityAction<string>(_ =>
-        {
-            if (_model?.AccountLinkButtonEnabled == true)
-                _submitAccountCode(_accountCode);
-        }));
+        input.onSubmit.AddListener(
+            BppDelegates.UnityAction<string>(_ =>
+            {
+                if (_model?.AccountLinkButtonEnabled == true)
+                    _submitAccountCode(_accountCode);
+            })
+        );
         _accountInput = input;
         _accountSubmit = Button(
             _accountForm,

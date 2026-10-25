@@ -15,13 +15,19 @@ internal static class CollectionTierActiveTooltipPatch
 {
     [HarmonyPostfix]
     [HarmonyPriority(Priority.Last)]
-    private static void Postfix(CardTooltipData __instance, ref Il2CppSystem.Collections.Generic.List<TooltipSegment> __result)
-    {
 #if BPP_ANDROID
+    private static void Postfix(
+        CardTooltipData __instance,
+        ref Il2CppSystem.Collections.Generic.List<TooltipSegment> __result
+    )
+    {
         _ = __instance;
         _ = __result;
         return;
+    }
 #else
+    private static void Postfix(CardTooltipData __instance, ref List<TooltipSegment> __result)
+    {
         if (CollectionTierTooltipPreview.IsRenderingVariant)
             return;
 
@@ -33,23 +39,32 @@ internal static class CollectionTierActiveTooltipPatch
         {
             CollectionTierTooltipLog.ReportDegraded(CollectionTierField.Active, ex);
         }
-#endif
     }
+#endif
 }
 
 [HarmonyPatch(typeof(CardTooltipData), nameof(CardTooltipData.GetPassiveTooltipBlock))]
 internal static class CollectionTierPassiveTooltipPatch
 {
 #if BPP_ANDROID
-    // The native tuple contains a reference-bearing value type. Preserve native text.
+    // The ARM64 detour cannot safely marshal this reference-bearing tuple return.
+    // Skip the detour itself: returning early from the postfix still crosses that ABI.
     [HarmonyPrepare]
     private static bool Prepare() => false;
 #endif
+
     [HarmonyPostfix]
     [HarmonyPriority(Priority.Last)]
     private static void Postfix(
         CardTooltipData __instance,
+#if BPP_ANDROID
+        Il2CppSystem.ValueTuple<
+            Il2CppSystem.Text.StringBuilder,
+            Il2CppSystem.Nullable<TooltipSegment>
+        > __result
+#else
         ref ValueTuple<StringBuilder, TooltipSegment?> __result
+#endif
     )
     {
         if (CollectionTierTooltipPreview.IsRenderingVariant)
@@ -57,7 +72,11 @@ internal static class CollectionTierPassiveTooltipPatch
 
         try
         {
+#if BPP_ANDROID
+            CollectionTierTooltipPreview.MergePassive(__instance, __result);
+#else
             CollectionTierTooltipPreview.MergePassive(__instance, ref __result);
+#endif
         }
         catch (Exception ex)
         {

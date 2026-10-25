@@ -54,6 +54,12 @@ internal sealed class BppConfig
 
     public ConfigEntry<BppChineseLocaleMode> ChineseLocaleModeConfig { get; }
 
+    public ConfigEntry<BppUiLanguage> UiLanguageConfig { get; }
+
+    public ConfigEntry<float> TouchDockAnchorXConfig { get; }
+
+    public ConfigEntry<float> TouchDockAnchorYConfig { get; }
+
     public ConfigEntry<LegendaryPositionDisplayMode> LegendaryPositionDisplayModeConfig { get; }
 
     public ConfigEntry<GraphicsUpscalingMode> GraphicsUpscalingModeConfig { get; }
@@ -203,6 +209,36 @@ internal sealed class BppConfig
         );
         ChineseLocaleModeConfig.Value = ChineseScriptConverter.NormalizeMode(
             ChineseLocaleModeConfig.Value
+        );
+        UiLanguageConfig = config.Bind(
+            "Localization",
+            "UiLanguage",
+            BppUiLanguage.Auto,
+            "Language for the BazaarPlusPlus UI. Auto follows the game language and falls back to the "
+                + "system language when the game stored none. English, Chinese, German, Portuguese, "
+                + "Korean, and Italian force that language."
+        );
+        // The touch dock remembers where the user dragged it: a normalized anchor of the BPP
+        // toggle's centre inside the safe area. (1, 0.5) is the default right edge.
+        TouchDockAnchorXConfig = config.Bind(
+            "TouchDock",
+            "AnchorX",
+            1f,
+            new ConfigDescription(
+                "Horizontal position of the touch dock, as a fraction of the safe area. 1 is the "
+                    + "right edge. Long-press BPP on the device to move it.",
+                new AcceptableValueRange<float>(0f, 1f)
+            )
+        );
+        TouchDockAnchorYConfig = config.Bind(
+            "TouchDock",
+            "AnchorY",
+            0.5f,
+            new ConfigDescription(
+                "Vertical position of the touch dock, as a fraction of the safe area. 0.5 is the "
+                    + "middle. Long-press BPP on the device to move it.",
+                new AcceptableValueRange<float>(0f, 1f)
+            )
         );
         LegendaryPositionDisplayModeConfig = config.Bind(
             "LegendaryPositionDisplay",

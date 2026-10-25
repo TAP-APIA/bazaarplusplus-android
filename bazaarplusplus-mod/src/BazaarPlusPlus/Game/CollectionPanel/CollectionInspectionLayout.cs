@@ -14,6 +14,41 @@ internal readonly record struct CollectionInspectionLayout(
     float Gap
 )
 {
+    // Available card lane in top-down screen pixels, with the measured selector below it.
+    public static CollectionInspectionLayout ForDrawer(
+        float left,
+        float top,
+        float laneWidth,
+        float laneHeight,
+        float visualWidth,
+        float visualHeight,
+        float selectorHeight,
+        float gap
+    )
+    {
+        laneWidth = Math.Max(1, laneWidth);
+        laneHeight = Math.Max(1, laneHeight);
+        visualWidth = Math.Max(1, visualWidth);
+        visualHeight = Math.Max(1, visualHeight);
+        var padding = Math.Min(laneWidth, laneHeight) * .025f;
+        var availableHeight = Math.Max(1, laneHeight - padding * 2 - selectorHeight - gap);
+        var scale = Math.Min(laneWidth * .72f / visualWidth, availableHeight / visualHeight);
+        var width = visualWidth * scale;
+        var height = visualHeight * scale;
+        return new(
+            left + (laneWidth - width) / 2,
+            top + padding + (availableHeight - height) / 2,
+            width,
+            height,
+            0,
+            0,
+            0,
+            0,
+            scale,
+            gap
+        );
+    }
+
     public static CollectionInspectionLayout ForContent(
         float width,
         float height,

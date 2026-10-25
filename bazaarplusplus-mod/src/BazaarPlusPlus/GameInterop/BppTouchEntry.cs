@@ -6,9 +6,11 @@ using BazaarPlusPlus.Game.LiveBuildPanel;
 using BazaarPlusPlus.GameInterop.Fonts;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
+using BazaarPlusPlus.Infrastructure.UiTokens;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.UI;
 
 namespace BazaarPlusPlus.GameInterop;
@@ -26,6 +28,9 @@ internal sealed class BppTouchEntry : MonoBehaviour
     // one-shot uGUI raycast audit runs, so the lobby's native canvases are already alive.
     private const int RaycastAuditStartupDelayFrames = 180;
     private const int RaycastAuditPanelDelayFrames = 45;
+
+    // Hold the BPP pill this long, then drag, to move the rail anywhere in the safe area.
+    private const float DockLongPressSeconds = 0.45f;
 
     // The startup dump runs while the game is still on the loading/trailer screen, where the
     // main-menu controls do not exist yet. Probe once the lobby has actually been built, but
@@ -75,6 +80,10 @@ internal sealed class BppTouchEntry : MonoBehaviour
 
     private static int _nextPanel;
 
+    // Where the dock starts before the user ever drags it: the safe right edge, vertically centred.
+    private static Vector2 _initialAnchor = new(1f, .5f);
+    private static Action<Vector2>? _persistAnchor;
+
     // Last reading of the lobby gate. Reported once if the window closes, so a timeout says which
     // condition was still false instead of leaving only "the audit never ran".
     private static string _mainMenuGateState = "not_observed";
@@ -83,9 +92,38 @@ internal sealed class BppTouchEntry : MonoBehaviour
     private static float _mainMenuGateLowChildCountSince = -1f;
     private GameObject? _canvasRoot;
     private GameObject? _drawerRoot;
+    private RectTransform? _dockRect;
     private bool _expanded = true;
     private bool _multiTouchLatch;
     private bool _fontApplied;
+
+    // Dock drag state. A long press on the BPP pill starts a drag, which is the only way to move
+    // the rail: taps still collapse and expand the drawer, so a drag sets _dockDragConsumedClick
+    // to swallow the Button.onClick that release would otherwise deliver.
+    private Vector2 _dockAnchor;
+    private OverlayPixelRect _dockSafe;
+    private Rect _toggleScreenRect;
+    private bool _dockPressing;
+    private bool _dockDragging;
+    private bool _dockDragConsumedClick;
+    private float _dockPressStartedAt;
+    private int _dockDragTouchId = -1;
+    private Vector2 _dockDragPointer;
+
+    // Installed by Plugin before the canvas exists: the persisted anchor plus the callback that
+    // writes it back once a drag ends.
+    internal static void Install(Vector2 anchor, Action<Vector2> persist)
+    {
+        _initialAnchor = new Vector2(Mathf.Clamp01(anchor.x), Mathf.Clamp01(anchor.y));
+        _persistAnchor = persist;
+    }
+
+    internal static void Reset()
+    {
+        _initialAnchor = new Vector2(1f, .5f);
+        _persistAnchor = null;
+    }
+
     private int _raycastAuditFrames;
     private bool _raycastAuditStartupDone;
     private int _raycastAuditPanelFrames;
@@ -124,6 +162,9 @@ internal sealed class BppTouchEntry : MonoBehaviour
                 TryApplyFont();
             }
 
+            UpdateSafeArea();
+            TickDockVisibility();
+            PollDockDrag();
             PollThreeFingerGesture();
             TickRaycastAudit();
             TickTrailerSkipLayer();
@@ -508,27 +549,37 @@ internal sealed class BppTouchEntry : MonoBehaviour
         canvas.sortingOrder = 32000;
 
         var scaler = _canvasRoot.GetComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        scaler.matchWidthOrHeight = 0.5f;
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+        scaler.scaleFactor = 1f;
 
-        // Dock container anchored near top-right (left of the corner X/settings buttons).
-        var dockRect = CreateRect(
+        // Vertical rail placed by the persisted anchor, bottom-left anchored so a drag can move it
+        // anywhere in the safe area. Defaults to the safe right edge, vertically centred.
+        _dockAnchor = _initialAnchor;
+        _dockRect = CreateRect(
             "BppTouchDock",
             _canvasRoot.transform,
-            new Vector2(1f, 1f),
-            new Vector2(1f, 1f),
-            new Vector2(-180f, -18f),
-            new Vector2(460f, 52f)
+            Vector2.zero,
+            Vector2.zero,
+            Vector2.zero,
+            new Vector2(
+                AndroidOverlayGeometry.DockColumnWidth,
+                AndroidOverlayGeometry.DockColumnHeight
+            )
         );
+        var dockRect = _dockRect;
+        var buttonSize = new Vector2(
+            AndroidOverlayGeometry.DockColumnWidth,
+            AndroidOverlayGeometry.ButtonHeight
+        );
+        var rowStep = AndroidOverlayGeometry.ButtonHeight + AndroidOverlayGeometry.DockGap;
 
-        // Main toggle pill on the right end of the bar.
+        // Main toggle pill at the top of the rail.
         CreatePillButton(
             dockRect,
             "ToggleBtn",
             "BPP",
-            new Vector2(368f, 0f),
-            new Vector2(92f, 48f),
+            Vector2.zero,
+            buttonSize,
             new Color(0.14f, 0.11f, 0.08f, 0.92f),
             new Color(0.96f, 0.82f, 0.46f, 1f),
             ToggleDrawer
@@ -539,8 +590,11 @@ internal sealed class BppTouchEntry : MonoBehaviour
             dockRect,
             new Vector2(0f, 1f),
             new Vector2(0f, 1f),
-            Vector2.zero,
-            new Vector2(360f, 48f)
+            new Vector2(0f, -rowStep),
+            new Vector2(
+                AndroidOverlayGeometry.DockColumnWidth,
+                rowStep * 3f - AndroidOverlayGeometry.DockGap
+            )
         );
         _drawerRoot = drawerRect.gameObject;
 
@@ -548,8 +602,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
             drawerRect,
             "BuildsBtn",
             "配装 Builds",
-            new Vector2(0f, 0f),
-            new Vector2(114f, 48f),
+            Vector2.zero,
+            buttonSize,
             new Color(0.18f, 0.14f, 0.09f, 0.92f),
             new Color(0.95f, 0.90f, 0.78f, 1f),
             static () =>
@@ -563,8 +617,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
             drawerRect,
             "CardsBtn",
             "图鉴 Cards",
-            new Vector2(122f, 0f),
-            new Vector2(114f, 48f),
+            new Vector2(0f, -rowStep),
+            buttonSize,
             new Color(0.18f, 0.14f, 0.09f, 0.92f),
             new Color(0.95f, 0.90f, 0.78f, 1f),
             static () =>
@@ -578,8 +632,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
             drawerRect,
             "HistoryBtn",
             "历史 History",
-            new Vector2(244f, 0f),
-            new Vector2(114f, 48f),
+            new Vector2(0f, -rowStep * 2f),
+            buttonSize,
             new Color(0.18f, 0.14f, 0.09f, 0.92f),
             new Color(0.95f, 0.90f, 0.78f, 1f),
             static () =>
@@ -589,15 +643,187 @@ internal sealed class BppTouchEntry : MonoBehaviour
             }
         );
 
+        UpdateSafeArea();
         TryApplyFont();
         BppStartupTrace.Write("touch-entry:ugui-ready");
     }
 
+    private void UpdateSafeArea()
+    {
+        if (_dockRect == null)
+            return;
+
+        // ReserveDockGutter only affects Content, never Safe, so reading the geometry here cannot
+        // depend on the placement this method is about to compute.
+        var geometry = AndroidOverlayViewport.Read();
+        var scale = geometry.TouchScale;
+        _dockSafe = geometry.Safe;
+        _dockRect.localScale = new Vector3(scale, scale, 1f);
+        var placement = AndroidOverlayGeometry.PlaceRail(
+            geometry.Safe,
+            _dockAnchor.x,
+            _dockAnchor.y,
+            _expanded,
+            scale
+        );
+        _dockRect.anchoredPosition = new Vector2(placement.Left, placement.Bottom);
+        _toggleScreenRect = new Rect(
+            placement.Left,
+            placement.Top - AndroidOverlayGeometry.ButtonHeight * scale,
+            placement.Width,
+            AndroidOverlayGeometry.ButtonHeight * scale
+        );
+    }
+
+    // The dock exists to open a panel; while one is open its own close control is enough, and any
+    // floating button over the card description covers the text the player is reading.
+    private void TickDockVisibility()
+    {
+        if (_canvasRoot == null)
+            return;
+
+        var hide = CollectionPanel.IsVisible || LiveBuildPanel.IsVisible || HistoryPanel.IsVisible;
+        if (hide == !_canvasRoot.activeSelf)
+            return;
+
+        if (hide && _dockPressing)
+            EndDockDrag();
+        _canvasRoot.SetActive(!hide);
+    }
+
+    // Long-press the BPP pill to move the rail. Input is polled instead of using uGUI drag
+    // interfaces because interface dispatch on the injected MonoBehaviour needs Il2Cpp trampolines,
+    // and the Button underneath already consumes the tap so the game never sees the press.
+    private void PollDockDrag()
+    {
+        var touchscreen = Touchscreen.current;
+        if (touchscreen == null)
+        {
+            _dockPressing = false;
+            _dockDragging = false;
+            return;
+        }
+
+        var touches = touchscreen.touches;
+        if (!_dockPressing)
+        {
+            for (var i = 0; i < touches.Count; i++)
+            {
+                var candidate = touches[i];
+                if (candidate == null || !candidate.press.wasPressedThisFrame)
+                    continue;
+                if (!candidate.press.isPressed)
+                    continue;
+
+                var position = candidate.position.ReadValue();
+                if (!_toggleScreenRect.Contains(position))
+                    continue;
+
+                _dockPressing = true;
+                _dockDragging = false;
+                _dockDragConsumedClick = false;
+                _dockPressStartedAt = Time.unscaledTime;
+                _dockDragTouchId = candidate.touchId.ReadValue();
+                _dockDragPointer = position;
+                return;
+            }
+
+            return;
+        }
+
+        var touch = FindTouch(touches, _dockDragTouchId);
+        if (touch == null)
+        {
+            EndDockDrag();
+            return;
+        }
+
+        var current = touch.position.ReadValue();
+        if (!_dockDragging)
+        {
+            // Only a finger that stays on the pill can pick the dock up; sliding off it first is a
+            // swipe, not a move request.
+            if (!_toggleScreenRect.Contains(current))
+            {
+                EndDockDrag();
+                return;
+            }
+
+            if (Time.unscaledTime - _dockPressStartedAt >= DockLongPressSeconds)
+            {
+                _dockDragging = true;
+                _dockDragConsumedClick = true;
+            }
+        }
+
+        if (_dockDragging)
+        {
+            var delta = current - _dockDragPointer;
+            var limit = _dockSafe.Width * .1f;
+            if (delta.sqrMagnitude > limit * limit)
+                delta = delta.normalized * limit;
+            MoveDockAnchor(delta);
+        }
+
+        _dockDragPointer = current;
+        if (touch.press.wasReleasedThisFrame || !touch.press.isPressed)
+            EndDockDrag();
+    }
+
+    private static TouchControl? FindTouch(
+        UnityEngine.InputSystem.Utilities.ReadOnlyArray<TouchControl> touches,
+        int touchId
+    )
+    {
+        for (var i = 0; i < touches.Count; i++)
+        {
+            var touch = touches[i];
+            if (touch != null && touch.touchId.ReadValue() == touchId)
+                return touch;
+        }
+
+        return null;
+    }
+
+    private void MoveDockAnchor(Vector2 deltaPixels)
+    {
+        if (_dockSafe.Width < 1f || _dockSafe.Height < 1f)
+            return;
+
+        _dockAnchor = new Vector2(
+            Mathf.Clamp01(_dockAnchor.x + deltaPixels.x / _dockSafe.Width),
+            Mathf.Clamp01(_dockAnchor.y + deltaPixels.y / _dockSafe.Height)
+        );
+    }
+
+    private void EndDockDrag()
+    {
+        if (_dockDragging)
+        {
+            _persistAnchor?.Invoke(_dockAnchor);
+            BppLog.InfoEvent(
+                new BppLogEvent(BppLogFeatureScope.Plugin, "plugin.touch_dock.moved"),
+                ("anchor_x", _dockAnchor.x.ToString("0.###")),
+                ("anchor_y", _dockAnchor.y.ToString("0.###"))
+            );
+        }
+
+        _dockPressing = false;
+        _dockDragging = false;
+        _dockDragTouchId = -1;
+    }
+
     private void ToggleDrawer()
     {
+        // A long-press drag ends with a click on the pill it started from; that click must not also
+        // collapse the drawer. The flag clears on the next fresh press.
+        if (_dockDragConsumedClick)
+            return;
+
         _expanded = !_expanded;
         if (_drawerRoot != null)
             _drawerRoot.SetActive(_expanded);
+        UpdateSafeArea();
     }
 
     private void TryApplyFont()
@@ -670,6 +896,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
         return rect;
     }
 
+    // Dark pill with a gold frame. The dock floats above the panels, so the fill keeps the label
+    // readable over whatever sits underneath instead of relying on the text alone.
     private static void CreatePillButton(
         Transform parent,
         string name,

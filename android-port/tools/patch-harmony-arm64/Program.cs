@@ -1,5 +1,6 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using Mono.Cecil.Rocks;
 
 // Patch only the Android ARM64 distribution. AAPCS64 passes the single-pointer
 // CancellationToken struct in a register by value. The x64-oriented converter
@@ -9,12 +10,19 @@ if (args.Length != 2) throw new ArgumentException("Expected input and output Har
 using var module = ModuleDefinition.ReadModule(args[0]);
 var owner = module.Types.Single(t => t.Name == "Il2CppDetourMethodPatcher");
 var convert = owner.Methods.Single(m => m.Name == "EmitConvertArgumentToManaged");
+// Inserting even one byte can overflow the original Nullable branch's 127-byte
+// short jump. Widen branches before editing so Cecil preserves their targets.
+convert.Body.SimplifyMacros();
 if (owner.Methods.Any(m => m.Name == "BppAndroidUsesIndirectStructArgument"))
     throw new InvalidOperationException("Input has already been patched.");
 var calls = convert.Body.Instructions.Where(i => i.OpCode == OpCodes.Call
     && i.Operand is MethodReference m && m.FullName == "System.Boolean System.Environment::get_Is64BitProcess()").ToArray();
-if (calls.Length != 1) throw new InvalidOperationException($"Expected one original ABI selection, found {calls.Length}.");
-var is64 = (MethodReference)calls[0].Operand;
+if (calls.Length == 0) throw new InvalidOperationException($"Expected original ABI selection, found {calls.Length}.");
+
+// In newer HarmonySupport, there is a call in the Nullable unbox branch and a call in the ValueType box branch.
+// We patch the boxing branch (the one near il2cpp_value_box).
+var original = calls.Length == 1 ? calls[0] : calls.Last();
+var is64 = (MethodReference)original.Operand;
 var helper = new MethodDefinition("BppAndroidUsesIndirectStructArgument",
     MethodAttributes.Private | MethodAttributes.Static | MethodAttributes.HideBySig, module.TypeSystem.Boolean);
 helper.Parameters.Add(new ParameterDefinition("type", ParameterAttributes.None, convert.Parameters[2].ParameterType));
@@ -34,8 +42,7 @@ il.Emit(OpCodes.Ldc_I4_0);
 il.Emit(OpCodes.Ret);
 il.Append(otherType);
 il.Emit(OpCodes.Ret);
-var original = calls[0];
-convert.Body.GetILProcessor().InsertBefore(original, Instruction.Create(OpCodes.Ldarg_2));
+convert.Body.GetILProcessor().InsertBefore(original, Instruction.Create(OpCodes.Ldarg, convert.Parameters[2]));
 original.Operand = helper;
 module.Write(args[1]);
 using var verified = ModuleDefinition.ReadModule(args[1]);

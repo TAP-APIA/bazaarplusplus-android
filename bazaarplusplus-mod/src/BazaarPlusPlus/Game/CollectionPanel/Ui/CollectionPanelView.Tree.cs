@@ -1,9 +1,9 @@
 #nullable enable
-using BazaarPlusPlus.Infrastructure;
 using BazaarGameShared.Domain.Core.Types;
 using BazaarPlusPlus.Game.CollectionPanel.Data;
 using BazaarPlusPlus.Game.CollectionPanel.Grid;
 using BazaarPlusPlus.Game.Supporters.Ui;
+using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.UiTokens;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -15,6 +15,7 @@ internal sealed partial class CollectionPanelView
     private void BuildTree(VisualElement root)
     {
         var panel = new VisualElement();
+        _content = panel;
         panel.style.flexGrow = 1f;
         panel.style.backgroundColor = Colors.CollectionPanelBackground;
         panel.style.paddingLeft = UiSpacing.PanelPadding;
@@ -160,7 +161,9 @@ internal sealed partial class CollectionPanelView
         heroHeaderRow.Add(_allHeroesButton);
         _heroChipRow.style.flexWrap = Wrap.NoWrap;
         _heroChipRow.style.justifyContent = Justify.FlexStart;
-        _heroChipRow.RegisterCallback<GeometryChangedEvent>(BppDelegates.EventCallback<GeometryChangedEvent>(OnHeroChipRowGeometryChanged));
+        _heroChipRow.RegisterCallback<GeometryChangedEvent>(
+            BppDelegates.EventCallback<GeometryChangedEvent>(OnHeroChipRowGeometryChanged)
+        );
 
         // Keep hero, size, and quality in one visual card. The child section contributes only its
         // chip row, without introducing a nested card or a second heading.
@@ -253,7 +256,9 @@ internal sealed partial class CollectionPanelView
         _sourceChipRow.style.flexDirection = FlexDirection.Column;
         _sourceChipRow.style.flexWrap = Wrap.NoWrap;
         _sourceChipRow.style.justifyContent = Justify.FlexStart;
-        _sourceChipRow.RegisterCallback<GeometryChangedEvent>(BppDelegates.EventCallback<GeometryChangedEvent>(OnSourceChipRowGeometryChanged));
+        _sourceChipRow.RegisterCallback<GeometryChangedEvent>(
+            BppDelegates.EventCallback<GeometryChangedEvent>(OnSourceChipRowGeometryChanged)
+        );
 
         _disclaimerLabel = CreateLabel(
             Sizes.FontCorner,
@@ -303,7 +308,9 @@ internal sealed partial class CollectionPanelView
         UiStyle.FixedHeight(shadow.style, Sizes.CollectionScrollShadowHeight);
         shadow.style.display = DisplayStyle.None;
 #if !BPP_ANDROID
-        shadow.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context => DrawControlsScrollShadow(context, shadow));
+        shadow.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context =>
+            DrawControlsScrollShadow(context, shadow)
+        );
 #endif
         return shadow;
     }
@@ -356,7 +363,8 @@ internal sealed partial class CollectionPanelView
 #else
         UiStyle.BorderWidth(card.style, Borders.None);
         card.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context =>
-            DrawCollectionFilterCardBackground(context, card, resolvedPalette));
+            DrawCollectionFilterCardBackground(context, card, resolvedPalette)
+        );
 #endif
     }
 
@@ -626,7 +634,9 @@ internal sealed partial class CollectionPanelView
 #if BPP_ANDROID
         button.text = "X";
 #else
-        icon.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context => DrawCloseIcon(context, icon));
+        icon.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context =>
+            DrawCloseIcon(context, icon)
+        );
         button.Add(icon);
 #endif
         return button;
@@ -652,7 +662,9 @@ internal sealed partial class CollectionPanelView
 #if BPP_ANDROID
         button.text = "R";
 #else
-        icon.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context => DrawResetIcon(context, icon));
+        icon.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context =>
+            DrawResetIcon(context, icon)
+        );
         button.Add(icon);
 #endif
         return button;
@@ -803,11 +815,13 @@ internal sealed partial class CollectionPanelView
         _searchPlaceholderLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
         frame.Add(_searchPlaceholderLabel);
 
-        field.RegisterCallback<ChangeEvent<string>>(BppDelegates.EventCallback<ChangeEvent<string>>(evt =>
-        {
-            RefreshSearchPlaceholder(evt.newValue);
-            _commands.SetSearchQuery(evt.newValue);
-        }));
+        field.RegisterCallback<ChangeEvent<string>>(
+            BppDelegates.EventCallback<ChangeEvent<string>>(evt =>
+            {
+                RefreshSearchPlaceholder(evt.newValue);
+                _commands.SetSearchQuery(evt.newValue);
+            })
+        );
         var hovered = false;
         var focused = false;
         void RefreshFrame()
@@ -829,33 +843,43 @@ internal sealed partial class CollectionPanelView
             UiStyle.BorderColor(frame.style, border);
         }
 
-        field.RegisterCallback<MouseEnterEvent>(BppDelegates.EventCallback<MouseEnterEvent>(_ =>
-        {
-            hovered = true;
-            RefreshFrame();
-        }));
-        field.RegisterCallback<MouseLeaveEvent>(BppDelegates.EventCallback<MouseLeaveEvent>(_ =>
-        {
-            hovered = false;
-            RefreshFrame();
-        }));
-        field.RegisterCallback<FocusInEvent>(BppDelegates.EventCallback<FocusInEvent>(_ =>
-        {
-            focused = true;
-            _searchFocused = true;
-            _searchFocusPulseElapsed = 0f;
-            RefreshFrame();
-        }));
-        field.RegisterCallback<FocusOutEvent>(BppDelegates.EventCallback<FocusOutEvent>(_ =>
-        {
-            focused = false;
-            _searchFocused = false;
-            _searchFocusPulseElapsed = 0f;
-            RefreshFrame();
-        }));
+        field.RegisterCallback<MouseEnterEvent>(
+            BppDelegates.EventCallback<MouseEnterEvent>(_ =>
+            {
+                hovered = true;
+                RefreshFrame();
+            })
+        );
+        field.RegisterCallback<MouseLeaveEvent>(
+            BppDelegates.EventCallback<MouseLeaveEvent>(_ =>
+            {
+                hovered = false;
+                RefreshFrame();
+            })
+        );
+        field.RegisterCallback<FocusInEvent>(
+            BppDelegates.EventCallback<FocusInEvent>(_ =>
+            {
+                focused = true;
+                _searchFocused = true;
+                _searchFocusPulseElapsed = 0f;
+                RefreshFrame();
+            })
+        );
+        field.RegisterCallback<FocusOutEvent>(
+            BppDelegates.EventCallback<FocusOutEvent>(_ =>
+            {
+                focused = false;
+                _searchFocused = false;
+                _searchFocusPulseElapsed = 0f;
+                RefreshFrame();
+            })
+        );
         RefreshFrame();
 
-        field.RegisterCallback<GeometryChangedEvent>(BppDelegates.EventCallback<GeometryChangedEvent>(_ => StyleSearchField(field)));
+        field.RegisterCallback<GeometryChangedEvent>(
+            BppDelegates.EventCallback<GeometryChangedEvent>(_ => StyleSearchField(field))
+        );
         return container;
     }
 
@@ -991,7 +1015,9 @@ internal sealed partial class CollectionPanelView
         icon.style.marginRight = UiSpacing.Xxs;
         icon.style.color = Colors.CollectionChipSelectedText;
 #if !BPP_ANDROID
-        icon.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context => DrawSortIcon(context, icon));
+        icon.generateVisualContent += BppDelegates.Action<MeshGenerationContext>(context =>
+            DrawSortIcon(context, icon)
+        );
 #endif
         button.Add(icon);
 

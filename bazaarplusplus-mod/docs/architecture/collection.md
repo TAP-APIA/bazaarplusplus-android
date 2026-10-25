@@ -38,6 +38,8 @@ Clearing the failure window is not enough on its own: every failure exit also ca
 
 Traps and rules that bite only this feature; most failed silently at least once.
 
+- Android's mobile tray and its nested description canvas need distinct sorting orders: flattening both to one order composites the tray's dark background over otherwise fully opaque text. `NativeInspectionPresentation.PromoteDescriptionCanvas` leases only the description above the tray, without detaching its scaler or scroll mask, and restores it before its parent. [`src/BazaarPlusPlus/GameInterop/Tooltips/NativeInspectionPresentation.cs`]
+
 - UI Toolkit `Button` inherits `TextElement`, so `Q<TextElement>()` returns the button itself when no separate label exists — hiding that "label" hides the whole control (guard with `!ReferenceEquals`), and a refresh writing `Button.text` resurrects the native label beside a custom one. [`src/BazaarPlusPlus/Game/CollectionPanel/Ui/CollectionPanelView.Filters.cs`]
 - The hardcoded `DayTierSchedule` was removed — do not restore it as a fallback. Day tiers resolve through `GameDataDayTierResolver`, whose success cache is keyed on `JsonGameDataManager` reference identity because the game swaps that reference after a GameData download. [`src/BazaarPlusPlus/GameInterop/DayTiers/GameDataDayTierResolver.cs`]
 - Aspect-fallback collection cards (no measurable frame or raw-image bounds) hold size via a one-shot `SetSizeWithCurrentAnchors` plus the per-cell bounds cache. This path shipped without in-game smoke; on card-size drift, apply the fallback documented in the fitter header. [`src/BazaarPlusPlus/Game/CollectionPanel/Grid/NativeCardCellFitter.cs`]

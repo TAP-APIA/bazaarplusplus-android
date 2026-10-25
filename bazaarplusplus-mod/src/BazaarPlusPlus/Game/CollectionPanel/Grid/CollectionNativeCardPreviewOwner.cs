@@ -64,10 +64,17 @@ internal sealed class CollectionNativeCardPreviewOwner : INativeCardPreviewOwner
 
     public void BeforeRelease(NativeCardPreviewOwnerContext context)
     {
+        if (context.Root == null)
+            return;
         context.Root.GetComponent<CollectionCardHoverScaleController>()?.ResetImmediate();
         var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
         var cardPreview = context.Root.GetComponent<CardPreviewBase>();
-        ReleaseOwnedState(marker, cardPreview, context.TooltipData ?? cardPreview?._tooltipData);
+        ReleaseOwnedState(
+            marker,
+            cardPreview,
+            context.TooltipData ?? cardPreview?._tooltipData,
+            isNativeDestroy: false
+        );
     }
 
     public void ReportFailure(NativeCardPreviewFailure failure)
@@ -137,19 +144,25 @@ internal sealed class CollectionNativeCardPreviewOwner : INativeCardPreviewOwner
     internal void OnNativeDestroyed(CardPreviewBase cardPreview)
     {
         var marker = cardPreview.GetComponent<CollectionPanelOwnedMarker>();
-        ReleaseOwnedState(marker, cardPreview, cardPreview._tooltipData);
+        ReleaseOwnedState(marker, cardPreview, cardPreview._tooltipData, isNativeDestroy: true);
     }
 
     private static void ReleaseOwnedState(
         CollectionPanelOwnedMarker? marker,
         CardPreviewBase? cardPreview,
-        TheBazaar.Tooltips.CardTooltipData? tooltipData
+        TheBazaar.Tooltips.CardTooltipData? tooltipData,
+        bool isNativeDestroy = false
     )
     {
-        if (tooltipData != null && marker?.TooltipRegistered == true)
+        if (marker != null)
         {
-            CollectionTierTooltipRegistry.Unregister(tooltipData.CardInstance);
-            marker.TooltipRegistered = false;
+            if (marker.TooltipRegistered)
+            {
+                if (tooltipData != null)
+                    CollectionTierTooltipRegistry.Unregister(tooltipData.CardInstance);
+                marker.TooltipRegistered = false;
+            }
+            marker.OnArtLoaded = null;
         }
 
         // Drop the card's references to the SO texture and the shared Material *before* releasing
@@ -166,13 +179,30 @@ internal sealed class CollectionNativeCardPreviewOwner : INativeCardPreviewOwner
                 cardImage.texture = null;
                 cardImage.material = null;
             }
+
+            if (marker?.CardMaterialOwnedByCache == true)
+            {
+                cardPreview._cardMaterial = null!;
+            }
+            else if (!isNativeDestroy && cardPreview._cardMaterial != null)
+            {
+                try
+                {
+                    UnityEngine.Object.Destroy(cardPreview._cardMaterial);
+                }
+                catch
+                {
+                    // best-effort
+                }
+                cardPreview._cardMaterial = null!;
+            }
         }
 
-        marker?.ReleaseCurrentArtKey();
         if (marker != null)
-            marker.OnArtLoaded = null;
-        if (cardPreview != null && marker?.CardMaterialOwnedByCache == true)
-            cardPreview._cardMaterial = null!;
+        {
+            marker.CardMaterialOwnedByCache = false;
+            marker.ReleaseCurrentArtKey();
+        }
     }
 
     internal static CollectionPanelLogReasonCode MapFailureReason(

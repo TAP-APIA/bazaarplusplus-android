@@ -13,10 +13,29 @@ internal static class AndroidNativeLibraries
     {
         try
         {
-            var coreClr = System.IO.File.ReadLines("/proc/self/maps")
-                .Select(line => line.IndexOf('/') is var start && start >= 0 ? line[start..].Trim() : string.Empty)
+            var coreClr = System
+                .IO.File.ReadLines("/proc/self/maps")
+                .Select(line =>
+                    line.IndexOf('/') is var start && start >= 0
+                        ? line[start..].Trim()
+                        : string.Empty
+                )
                 .First(path => path.EndsWith("/libcoreclr.so", StringComparison.Ordinal));
-            var sqlite = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(coreClr)!, "libe_sqlite3.so");
+            var sqlite = System.IO.Path.Combine(
+                System.IO.Path.GetDirectoryName(coreClr)!,
+                "libe_sqlite3.so"
+            );
+            if (!System.IO.File.Exists(sqlite))
+            {
+                // External storage cannot host executable mappings. Stage the modpack's
+                // Android library in the launcher's private game directory before loading it.
+                sqlite = System.IO.Path.Combine(BepInEx.Paths.GameRootPath, "libe_sqlite3.so");
+                System.IO.File.Copy(
+                    System.IO.Path.Combine(BepInEx.Paths.PluginPath, "libe_sqlite3.so"),
+                    sqlite,
+                    overwrite: true
+                );
+            }
             _sqlite = NativeLibrary.Load(sqlite);
             NativeLibrary.SetDllImportResolver(
                 typeof(SQLitePCL.SQLite3Provider_e_sqlite3).Assembly,
