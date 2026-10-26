@@ -13,7 +13,9 @@ public static class ItemEnchantPreviewSnapshotFactory
         TEnchantment previewTemplate
     )
     {
-        var previewAttributes = new Dictionary<ECardAttributeType, int>(itemCard.Attributes.ToManagedDictionary());
+        var previewAttributes = new Dictionary<ECardAttributeType, int>(
+            itemCard.Attributes.ToManagedDictionary()
+        );
 
         if (previewTemplate?.Attributes != null)
         {
@@ -25,8 +27,9 @@ public static class ItemEnchantPreviewSnapshotFactory
         {
             InstanceId = itemCard.InstanceId.ToString(),
             TemplateId = itemCard.TemplateId.ToString(),
-            Section = itemCard.Section.ToManagedNullable(),
-            CurrentEnchantment = itemCard.Enchantment.ToManagedNullable(),
+            Section = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(itemCard),
+            CurrentEnchantment =
+                BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(itemCard),
             PreviewEnchantment = previewEnchantment,
             PreviewAttributes = previewAttributes,
         };

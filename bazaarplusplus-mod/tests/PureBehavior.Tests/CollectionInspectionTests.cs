@@ -7,6 +7,44 @@ namespace PureBehavior.Tests;
 public sealed class CollectionInspectionTests
 {
     [Theory]
+    [InlineData(1f, 1.5f)]
+    [InlineData(1.5f, 2.0f)]
+    [InlineData(2.0f, 2.5f)]
+    public void Drawer_inspection_card_scales_with_ui_scale_ladder(
+        float smallerScale,
+        float largerScale
+    )
+    {
+        var small = CollectionInspectionLayout.ForDrawer(
+            0,
+            0,
+            1800,
+            1900,
+            300,
+            484,
+            180,
+            24,
+            smallerScale
+        );
+        var large = CollectionInspectionLayout.ForDrawer(
+            0,
+            0,
+            1800,
+            1900,
+            300,
+            484,
+            180,
+            24,
+            largerScale
+        );
+        Assert.True(large.CardWidth >= small.CardWidth);
+        Assert.True(large.CardHeight >= small.CardHeight);
+        Assert.True(large.CardX >= 0);
+        Assert.True(large.CardX + large.CardWidth <= 1800);
+        Assert.True(large.CardY + large.CardHeight <= 1900);
+    }
+
+    [Theory]
     [InlineData(400f, 600f, 1000f, 1200f, 1f)]
     [InlineData(400f, 2000f, 800f, 1000f, .5f)]
     [InlineData(1000f, 600f, 500f, 1200f, .5f)]
@@ -175,6 +213,35 @@ public sealed class CollectionInspectionTests
         Assert.NotEqual(original, reopened);
     }
 
+    [Theory]
+    [InlineData(20f, 0f)]
+    [InlineData(-24f, 18f)]
+    public void Finger_jitter_inside_the_touch_slop_still_opens(float dx, float dy)
+    {
+        var click = new CollectionInspectionClick();
+        var card = Guid.NewGuid();
+        Assert.False(click.Sample(true, false, card, 100f, 100f, 0f));
+        Assert.True(click.Sample(false, true, card, 100f + dx, 100f + dy, 0f));
+    }
+
+    [Fact]
+    public void Movement_beyond_the_touch_slop_is_a_drag_not_a_tap()
+    {
+        var click = new CollectionInspectionClick();
+        var card = Guid.NewGuid();
+        Assert.False(click.Sample(true, false, card, 100f, 100f, 0f));
+        Assert.False(
+            click.Sample(
+                false,
+                true,
+                card,
+                100f + CollectionInspectionClick.TapSlopPixels + 1f,
+                100f,
+                0f
+            )
+        );
+    }
+
     [Fact]
     public void Primary_click_opens_only_when_released_on_the_same_card_without_dragging()
     {
@@ -190,7 +257,7 @@ public sealed class CollectionInspectionTests
     }
 
     [Theory]
-    [InlineData(120f, 100f, 0f)]
+    [InlineData(100f + CollectionInspectionClick.TapSlopPixels + 1f, 100f, 0f)]
     [InlineData(100f, 100f, 20f)]
     public void Dragging_or_scrolling_cancels_the_primary_click_even_if_it_returns(
         float x,

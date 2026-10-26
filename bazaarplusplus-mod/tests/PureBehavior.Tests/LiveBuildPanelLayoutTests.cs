@@ -76,4 +76,16 @@ public sealed class LiveBuildPanelLayoutTests
         Assert.True(LiveBuildPanelLayout.MetricsHeight * .42f >= 13);
         Assert.True(LiveBuildPanelLayout.MetricsHeight * .58f >= 18);
     }
+
+    [Fact]
+    public void Desktop_layout_keeps_the_four_fitted_boards_and_never_scrolls()
+    {
+        // The readable/scroll mode is Android-only; desktop must keep the old even split.
+        var panel = new LiveBuildPanelLayout(1600, 1000);
+        Assert.False(panel.BoardScrolls);
+        Assert.Equal(0, panel.BoardMaxScroll, 3);
+        Assert.Equal(191.5f, panel.BoardHeight, 3);
+        Assert.Equal(panel.FooterTop, panel.BoardContentHeight, 3);
+        Assert.True(panel.BoardContentHeight <= panel.BoardViewportHeight + .001f);
+    }
 }

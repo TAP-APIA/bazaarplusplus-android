@@ -171,20 +171,39 @@ internal sealed class LiveBuildPanel
     {
         EnsureView();
         _refresh.SetVisible(true);
-        _supporters = BPPSupporters.SampleMany(SupporterAttributionCount);
-        _candidateState.Clear();
-        _recommendationIndex = 0;
-        var snapshotOutcome = _reader.Read();
-        _liveSnapshot = snapshotOutcome.Snapshot;
-        SeedCandidatesFromBoard();
-#if BPP_ANDROID
-        _liveReadRetryRemaining = _liveSnapshot.BoardItems.Count + _liveSnapshot.ShopItems.Count + _liveSnapshot.StashItems.Count == 0 ? 30f : 0f;
-        _liveReadRetryDelay = .5f;
-#endif
-        ReportLiveSnapshotIssues(snapshotOutcome.Issues);
-        RefreshRecommendations();
-        RefreshViewAndPreview();
         _view?.SetVisible(true);
+        try
+        {
+            _supporters = BPPSupporters.SampleMany(SupporterAttributionCount);
+            _candidateState.Clear();
+            _recommendationIndex = 0;
+            var snapshotOutcome = _reader.Read();
+            _liveSnapshot = snapshotOutcome.Snapshot;
+            SeedCandidatesFromBoard();
+#if BPP_ANDROID
+            _liveReadRetryRemaining =
+                _liveSnapshot.BoardItems.Count
+                + _liveSnapshot.ShopItems.Count
+                + _liveSnapshot.StashItems.Count
+                == 0
+                    ? 30f
+                    : 0f;
+            _liveReadRetryDelay = .5f;
+#endif
+            ReportLiveSnapshotIssues(snapshotOutcome.Issues);
+            RefreshRecommendations();
+            RefreshViewAndPreview();
+        }
+        catch (Exception ex)
+        {
+            BppLog.WarnEvent(
+                new BppLogEvent(
+                    BppLogFeatureScope.LiveBuildPanel,
+                    "live_build_panel.open.degraded"
+                ),
+                ex
+            );
+        }
     }
 
     // Opening with an empty selection shows "0 / 0" and no build, which reads as a broken corpus

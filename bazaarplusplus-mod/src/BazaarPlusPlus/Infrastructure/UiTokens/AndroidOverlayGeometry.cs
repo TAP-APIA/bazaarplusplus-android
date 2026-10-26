@@ -38,7 +38,7 @@ internal readonly record struct AndroidOverlayGeometry(
     internal const float ButtonHeight = 48;
     internal const float DockGap = 6;
     internal const float DockPadding = 8;
-    internal const int DockButtonCount = 4;
+    internal const int DockButtonCount = 5;
     internal const float DockColumnHeight =
         DockButtonCount * ButtonHeight + (DockButtonCount - 1) * DockGap;
 
@@ -73,7 +73,7 @@ internal readonly record struct AndroidOverlayGeometry(
                 Math.Clamp(density, .75f, 4f),
                 Math.Min(
                     safe.Width * .3f / (DockColumnWidth + DockPadding * 2),
-                    safe.Height * .55f / (DockColumnHeight + DockPadding * 2)
+                    safe.Height * .7f / (DockColumnHeight + DockPadding * 2)
                 )
             )
         );

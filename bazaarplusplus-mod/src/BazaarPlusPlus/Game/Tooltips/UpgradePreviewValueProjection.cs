@@ -84,11 +84,11 @@ internal sealed class UpgradePreviewValueProjection
             Tier = nextTier,
             Type = source.Type,
             Owner = source.Owner,
-            LeftSocketId = source.LeftSocketId,
-            Section = source.Section,
+            LeftSocketId = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.LeftSocketId(source).ToNativeNullable(),
+            Section = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(source).ToNativeNullable(),
             State = source.State,
             Template = template,
-            Enchantment = source.Enchantment,
+            Enchantment = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(source).ToNativeNullable(),
         };
 
         ApplyRuntimeMultipliers(source, projectedCard, itemTemplate, nextTier, sourceValueContext);

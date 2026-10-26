@@ -118,32 +118,8 @@ internal sealed class CollectionCardMaterialCache
 
     private void DestroyEvicted(IReadOnlyList<string> evictedKeys)
     {
-        foreach (var artKey in evictedKeys)
-        {
-            if (!_materials.TryGetValue(artKey, out var material))
-                continue;
-            _materials.Remove(artKey);
-            try
-            {
-                if (material != null)
-                    Object.Destroy(material);
-            }
-            catch (System.Exception ex)
-            {
-                BppLog.DebugEvent(
-                    new BppLogEvent(
-                        BppLogFeatureScope.CollectionPanel,
-                        "collection_panel.cache.cleanup_failed"
-                    ),
-                    ex,
-                    () =>
-                        [
-                            ("cache", CollectionCacheKind.Material),
-                            ("stage", CollectionCacheCleanupStage.EvictDestroy),
-                            ("art_key", artKey),
-                        ]
-                );
-            }
-        }
+        // Keep materials in _materials until DisposeAll() when the panel closes. Destroying a
+        // shared material mid-session while a visible or recycling card still points to it
+        // causes Unity to render a flat white quad on screen.
     }
 }

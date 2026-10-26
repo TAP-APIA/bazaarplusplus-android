@@ -1,6 +1,6 @@
 #nullable enable
-using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.GameInterop;
+using BazaarPlusPlus.Infrastructure;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -219,6 +219,12 @@ internal sealed class NativeGameTitleOverlay : IDisposable
     }
 
     private void OnGeometryChanged(GeometryChangedEvent evt) => SyncBounds();
+
+    internal void RefreshLayout()
+    {
+        SyncBounds();
+        _layoutAnchor?.schedule.Execute(BppDelegates.Action<TimerState>(_ => SyncBounds()));
+    }
 
     private void SyncBounds()
     {

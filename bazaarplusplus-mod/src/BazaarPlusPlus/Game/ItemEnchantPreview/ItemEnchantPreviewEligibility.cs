@@ -13,7 +13,13 @@ public static class ItemEnchantPreviewEligibility
         if (card == null)
             return false;
 
-        if (!IsEligible(card.Type, card.Section.ToManagedNullable(), isInCombat))
+        if (
+            !IsEligible(
+                card.Type,
+                BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(card),
+                isInCombat
+            )
+        )
         {
             return card.Type == ECardType.Item && !isInCombat && IsOpponentBoardItem(card);
         }
@@ -35,7 +41,7 @@ public static class ItemEnchantPreviewEligibility
             return true;
 
         return card.Owner == Data.Run?.Opponent?.TryCast<IPlayer>()
-            && card.Section.HasValue
-            && card.Section.Value == EInventorySection.Hand;
+            && BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(card)
+                == EInventorySection.Hand;
     }
 }

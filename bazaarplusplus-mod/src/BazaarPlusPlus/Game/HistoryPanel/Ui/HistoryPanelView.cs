@@ -147,6 +147,9 @@ internal sealed partial class HistoryPanelView : IDisposable
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1600, 1000);
         scaler.matchWidthOrHeight = .5f;
+#if BPP_ANDROID
+        AndroidOverlayViewport.ApplyCanvasScale(_root, matchHeight: false);
+#endif
 
         // Full-screen backdrop preventing clicks from falling through on cutout margins.
         var fullWall = CreateRect("FullModalWall", _root.transform, 0, 0, 1, 1);
@@ -269,6 +272,10 @@ internal sealed partial class HistoryPanelView : IDisposable
         UpdateInputFocus();
         var size = new Vector2(Screen.width, Screen.height);
         var safeArea = Screen.safeArea;
+#if BPP_ANDROID
+        if (_root != null && AndroidOverlayViewport.ApplyCanvasScale(_root, matchHeight: false))
+            _layoutFrames = 2;
+#endif
         var viewportChanged = ApplySafeAreaInsets();
         if (_screenSize != size || _lastSafeArea != safeArea || viewportChanged)
         {
@@ -483,10 +490,22 @@ internal sealed partial class HistoryPanelView : IDisposable
         _font?.Apply(text);
         text.text = label;
         text.fontSize = size;
+#if BPP_ANDROID
+        // Anchored header/filter cells keep their screen span. Allow a bounded shrink for long
+        // localized labels rather than losing the entire first glyph at large UI sizes.
+        text.enableAutoSizing = true;
+        text.fontSizeMin = size * .8f;
+        text.fontSizeMax = size;
+#endif
         text.color = color ?? Ink;
         text.alignment = center ? TextAlignmentOptions.Center : TextAlignmentOptions.MidlineLeft;
         text.textWrappingMode = TextWrappingModes.NoWrap;
         text.overflowMode = TextOverflowModes.Ellipsis;
+#if BPP_ANDROID
+        // TMP ellipsis can erase the entire mesh when a scaled CJK glyph is a little taller
+        // than an anchored header cell. Keep its vertical overhang; list viewports still mask.
+        text.overflowMode = TextOverflowModes.Overflow;
+#endif
         text.raycastTarget = false;
         return text;
     }

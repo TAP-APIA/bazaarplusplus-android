@@ -1,8 +1,8 @@
 #nullable enable
+using BazaarPlusPlus.Game.Input;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
-
-using BazaarPlusPlus.Game.Input;
+using BazaarPlusPlus.Patches;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -42,7 +42,14 @@ internal sealed class OverlayPanelHost : MonoBehaviour
         }
         catch (Exception ex)
         {
-            BppStartupTrace.Write("overlay-update-exception:" + ex.GetType().FullName + " | " + ex.Message + " | " + ex.StackTrace);
+            BppStartupTrace.Write(
+                "overlay-update-exception:"
+                    + ex.GetType().FullName
+                    + " | "
+                    + ex.Message
+                    + " | "
+                    + ex.StackTrace
+            );
             BppLog.WarnEvent(
                 new BppLogEvent(
                     BppLogFeatureScope.OverlayPanels,
@@ -58,8 +65,19 @@ internal sealed class OverlayPanelHost : MonoBehaviour
     {
         var keyboard = Keyboard.current;
         var modal = _core.OpenPanelId == null ? null : FindRegistration(_core.OpenPanelId);
-        var modalActive = modal?.IsModalInputActive?.Invoke() == true;
-        var escapePressed = keyboard?.escapeKey.wasPressedThisFrame == true;
+        var inRunInspection =
+            _core.OpenPanelId == null && BppPatchHost.Features.CollectionInspection.IsOpen;
+        var modalActive = modal?.IsModalInputActive?.Invoke() == true || inRunInspection;
+        // While a BPP panel or in-run card inspection owns the screen, Android back must close that view instead of
+        // leaving the game. The bridge registers only for that window.
+        SetBackConsume(_core.OpenPanelId != null || inRunInspection);
+        var escapePressed = keyboard?.escapeKey.wasPressedThisFrame == true || TakeAndroidBack();
+        if (inRunInspection && escapePressed)
+        {
+            BppPatchHost.Features.CollectionInspection.Close();
+            escapePressed = false;
+        }
+
         var snapshot = new OverlayFrameSnapshot
         {
             SceneToken = GetSceneToken(SceneManager.GetActiveScene()),
@@ -72,6 +90,9 @@ internal sealed class OverlayPanelHost : MonoBehaviour
         ExecuteDirectives(_core.Evaluate(snapshot));
 
         var dt = Time.unscaledDeltaTime;
+        if (inRunInspection && BppPatchHost.Features.CollectionInspection.IsOpen)
+            BppPatchHost.Features.CollectionInspection.Tick(dt);
+
         var openPanelId = _core.OpenPanelId;
         foreach (var registration in _registrations)
         {
@@ -135,7 +156,10 @@ internal sealed class OverlayPanelHost : MonoBehaviour
                 }
             );
         }
+        SetBackConsume(_core.OpenPanelId != null);
     }
+
+    private void OnDisable() => SetBackConsume(false);
 
     private OverlayPanelRegistration? FindRegistration(string panelId)
     {
@@ -155,10 +179,27 @@ internal sealed class OverlayPanelHost : MonoBehaviour
         _registrations.RemoveAll(registration =>
             string.Equals(registration.PanelId, panelId, StringComparison.Ordinal)
         );
+        SetBackConsume(_core.OpenPanelId != null);
     }
 
     private bool ReadIsInCombat() =>
         _logState.ReadIsInCombat(static () => TheBazaar.Data.IsInCombat);
+
+    private static void SetBackConsume(bool consume)
+    {
+#if BPP_ANDROID
+        BazaarPlusPlus.GameInterop.AndroidBackBridge.SetConsume(consume);
+#endif
+    }
+
+    private static bool TakeAndroidBack()
+    {
+#if BPP_ANDROID
+        return BazaarPlusPlus.GameInterop.AndroidBackBridge.TakeBackPress();
+#else
+        return false;
+#endif
+    }
 
     // Compare Scene values, not Scene.handle: Unity 6 changed that getter's return type
     // from int to SceneHandle. The equality operator's ABI is stable across both versions.

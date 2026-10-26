@@ -587,7 +587,8 @@ internal sealed class CollectionPanel
                 position.x,
                 position.y,
                 _scrollY
-            ) && id.HasValue
+            )
+            && id.HasValue
         )
             _inspection.OpenHovered(id.Value);
     }

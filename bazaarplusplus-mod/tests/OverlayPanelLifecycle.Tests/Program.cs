@@ -14,6 +14,7 @@ TestHotkeyOpenSuppressedInCombat();
 TestCombatAutoClosesOpenPanel();
 TestEscapeClosesOpenPanelOnly();
 TestModalConsumesEscapeAndHotkeysBeforeThePanel();
+TestBackDismissesModalThenPanelForEveryPanel();
 TestSceneChangeAlwaysPolicyClosesPanel();
 TestSceneChangeOnlyWhenInCombatPolicyKeepsPanelOpen();
 TestSceneChangeNotifiesEveryRegistrantAfterClose();
@@ -114,6 +115,39 @@ static void TestModalConsumesEscapeAndHotkeysBeforeThePanel()
     );
     AssertDirective(combat, 0, OverlayDirectiveKind.Close, "Collection");
     Assert(core.OpenPanelId == null, "Modal cannot prevent mandatory combat cleanup.");
+}
+
+static void TestBackDismissesModalThenPanelForEveryPanel()
+{
+    // Android's consumed Back is projected to EscapePressed by the adapter. Test that
+    // one press never dismisses both levels, including a press with no panel open.
+    foreach (var panelId in new[] { "Collection", "History", "LiveBuild" })
+    {
+        var core = NewCoreWithPanels();
+        Prime(core);
+        core.ExecuteOpenRequest(panelId, isInCombat: false, out _);
+        var first = core.Evaluate(
+            new OverlayFrameSnapshot
+            {
+                SceneToken = SceneA,
+                IsModalInputActive = true,
+                EscapePressed = true,
+            }
+        );
+        Assert(first.Count == 1, "Back emits exactly one modal dismissal.");
+        AssertDirective(first, 0, OverlayDirectiveKind.DismissModal, panelId);
+        Assert(core.OpenPanelId == panelId, "The panel survives modal dismissal.");
+        Assert(core.Evaluate(Frame()).Count == 0, "No pending Back leaks into the next frame.");
+
+        var second = core.Evaluate(Frame(escapePressed: true));
+        Assert(second.Count == 1, "A second Back closes only the panel.");
+        AssertDirective(second, 0, OverlayDirectiveKind.Close, panelId);
+        Assert(core.OpenPanelId == null, "Back releases panel ownership.");
+        Assert(
+            core.Evaluate(Frame(escapePressed: true)).Count == 0,
+            "No panel means no directive."
+        );
+    }
 }
 
 static void TestHotkeyOpensAndClosesSamePanel()

@@ -1,7 +1,7 @@
 """Verifies that a combined BPP launcher APK preserves the verified base launcher.
 
 Usage:
-  verify_combined_apk.py <base-apk> <combined-apk> <modpack-zip> <safe-runtime> <safe-harmony>
+  verify_combined_apk.py <base-apk> <combined-apk> <modpack-zip> <safe-runtime> <safe-harmony> [icon-dir]
 """
 
 import hashlib
@@ -18,6 +18,7 @@ from patch_manifest import (  # noqa: E402
     _get_start_element_info,
     _parse_string_pool,
 )
+from replace_icon import ADAPTIVE, LEGACY_ROUND, LEGACY_SQUARE  # noqa: E402
 
 ORIGINAL_MAIN_ACTIVITY = "com.bepinex.android.MainActivity"
 REQUIRED_ACTIVITIES = {
@@ -36,6 +37,34 @@ SIGNATURE_FILES = {
     "META-INF/ANDROIDD.RSA",
     "META-INF/MANIFEST.MF",
 }
+# The launcher icon is replaced by payload only: the manifest still points at the same adaptive
+# icon XML and resources.arsc keeps the same resource IDs and background color.
+ICON_ENTRIES = {
+    "res/QZ.png",
+    "res/zr.png",
+    "res/Em.png",
+    "res/Lf.png",
+    "res/as.png",
+    "res/9w.png",
+    "res/8c.png",
+    "res/FS.png",
+    "res/RJ.png",
+    "res/Gc.png",
+    "res/zR.png",
+    "res/yn.png",
+    "res/wb.png",
+    "res/fO.png",
+    "res/o-.png",
+}
+ICON_ASSET = {**ADAPTIVE, **LEGACY_SQUARE, **LEGACY_ROUND}
+if set(ICON_ASSET) != ICON_ENTRIES:
+    raise SystemExit("Icon replacement and verification lists diverged")
+
+
+def png_size(data: bytes) -> tuple[int, int]:
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit("Launcher icon entry is not a PNG")
+    return struct.unpack(">II", data[16:24])
 
 
 def sha256(data: bytes) -> str:
@@ -83,7 +112,7 @@ def read_manifest(axml: bytes):
 
 
 def main() -> int:
-    if len(sys.argv) != 6:
+    if len(sys.argv) not in (6, 7):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     base = Path(sys.argv[1])
@@ -91,6 +120,7 @@ def main() -> int:
     modpack_zip = Path(sys.argv[3])
     safe_runtime = Path(sys.argv[4]).read_bytes()
     safe_harmony = Path(sys.argv[5]).read_bytes()
+    icon_dir = Path(sys.argv[6]) if len(sys.argv) == 7 else None
 
     with zipfile.ZipFile(base) as zb, zipfile.ZipFile(combined) as zc:
         base_names = set(zb.namelist())
@@ -118,8 +148,19 @@ def main() -> int:
                 continue
             if name in SIGNATURE_FILES:
                 continue
+            if name in ICON_ENTRIES:
+                if zb.read(name) == zc.read(name):
+                    raise SystemExit(f"Launcher icon was not replaced: {name}")
+                png_size(zc.read(name))
+                continue
             if zb.read(name) != zc.read(name):
                 raise SystemExit(f"Existing entry changed unexpectedly: {name}")
+
+        if icon_dir is not None:
+            for name in ICON_ENTRIES:
+                replacement = icon_dir / ICON_ASSET[name]
+                if zc.read(name) != replacement.read_bytes():
+                    raise SystemExit(f"Launcher icon does not match the packaged asset: {name}")
 
         with zipfile.ZipFile(io.BytesIO(zb.read("assets/BepInEx.Android.zip"))) as zbo:
             with zipfile.ZipFile(io.BytesIO(zc.read("assets/BepInEx.Android.zip"))) as zbz:

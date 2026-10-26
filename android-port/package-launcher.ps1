@@ -8,7 +8,7 @@ param(
     [string]$SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
     [string]$KeyStore = '',
     [string]$KeyAlias = 'androiddebugkey',
-    [int]$VersionCode = 3,
+    [int]$VersionCode = 11,
     [switch]$UnsignedOnly
 )
 
@@ -106,7 +106,9 @@ try {
     New-Item -ItemType Directory -Force -Path $appClasses, $dexOut | Out-Null
     & $javac -encoding UTF-8 --release 11 -cp $platformJar -d $appClasses `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBundledModpackInstaller.java') `
-        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java')
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBackBridge.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java')
     if ($LASTEXITCODE -ne 0) { throw 'BppLauncherActivity compilation failed' }
 
     $compiledClassFiles = @(Get-ChildItem -LiteralPath $appClasses -Recurse -Filter *.class | Select-Object -ExpandProperty FullName)
@@ -258,7 +260,13 @@ print(f"Assembled unsigned APK: {unsigned_apk_out} (bundle_id={bundle_id[:12]}, 
         $unsignedApk
     if ($LASTEXITCODE -ne 0) { throw 'Failed to assemble combined APK' }
 
-    # 4. Page-align to 16 KB boundaries
+    # 4. Replace only the launcher icon PNG payloads; resources.arsc and manifest stay intact.
+    & python (Join-Path $launcherToolsDir 'replace_icon.py') `
+        $unsignedApk `
+        (Join-Path $PSScriptRoot 'assets/icon')
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to replace launcher icon' }
+
+    # 5. Page-align to 16 KB boundaries
     $zipalign = Join-Path $buildToolsDir 'zipalign.exe'
     & $zipalign -P 16 -f 4 $unsignedApk $alignedApk
     if ($LASTEXITCODE -ne 0) { throw 'zipalign failed' }
@@ -310,7 +318,8 @@ print(f"Assembled unsigned APK: {unsigned_apk_out} (bundle_id={bundle_id[:12]}, 
         ([IO.Path]::GetFullPath($Destination)) `
         ([IO.Path]::GetFullPath($ModpackZip)) `
         ([IO.Path]::GetFullPath($SafeRuntime)) `
-        ([IO.Path]::GetFullPath($SafeHarmony))
+        ([IO.Path]::GetFullPath($SafeHarmony)) `
+        (Join-Path $PSScriptRoot 'assets/icon')
     if ($LASTEXITCODE -ne 0) { throw 'Combined APK integrity verification failed' }
 
     Write-Host "Signed self-deploying APK: $Destination"

@@ -26,7 +26,7 @@ internal sealed class LiveCardSnapshotReader
             return new LiveCardSnapshotReadOutcome(
                 new LiveCardSnapshotSet(
                     run.Player.Hero,
-                    ReadShopItems(runState),
+                    ReadShopItems(runState, issues),
                     ReadContainerItems(run.Player.Hand, LiveCardSnapshotSection.Board, issues),
                     ReadContainerItems(run.Player.Stash, LiveCardSnapshotSection.Stash, issues)
                 ),
@@ -35,6 +35,8 @@ internal sealed class LiveCardSnapshotReader
         }
         catch (Exception ex)
         {
+            // Last resort: one section's native root being unreadable must not hide the sections
+            // that did read, but this path only runs when the isolation below cannot apply.
             issues.Add(
                 new LiveCardSnapshotIssue(
                     LiveCardSnapshotSection.All,
@@ -42,53 +44,62 @@ internal sealed class LiveCardSnapshotReader
                     templateId: null,
                     socketId: null,
                     itemSize: null,
-                    ex
+                    exception: ex
                 )
             );
             return new LiveCardSnapshotReadOutcome(LiveCardSnapshotSet.Empty, issues);
         }
     }
 
-    private static IReadOnlyList<LiveCardSnapshot> ReadShopItems(RunState? runState)
+    private static IReadOnlyList<LiveCardSnapshot> ReadShopItems(
+        RunState? runState,
+        List<LiveCardSnapshotIssue> issues
+    )
     {
         var result = new List<LiveCardSnapshot>();
-        if (runState?.SelectionSet == null)
+        if (runState?.SelectionSet is not { } selection)
             return result;
 
         var order = 0;
-#if BPP_ANDROID
-        foreach (var entry in runState.SelectionSet)
-        {
-            if (string.IsNullOrEmpty(entry))
-                continue;
-            Card? card;
-            try
+        ItemCard? current = null;
+        var read = LiveCardSlotReader.Read<LiveCardSnapshot>(
+            selection.Count,
+            slot =>
             {
-                card = Data.GetCard(entry);
-            }
-            catch
-            {
-                continue;
-            }
-            if (card.AsIl2Cpp<ItemCard>() is not { } itemCard)
-                continue;
+                current = null;
+                var entry = selection[slot];
+                if (string.IsNullOrEmpty(entry))
+                    return null;
 
-            result.Add(BuildSnapshot(itemCard, order++, socketId: null));
-        }
-#else
-        foreach (var entry in runState.SelectionSet)
-        {
-            var instanceId = InstanceId.TryParse(entry);
-            if (!Data.Entities.TryGetValue(instanceId, out var card))
-                continue;
-            if (card is not ItemCard itemCard)
-                continue;
+                var itemCard = ResolveShopItem(entry);
+                if (itemCard == null)
+                    return null;
 
-            result.Add(BuildSnapshot(itemCard, order++, socketId: null));
-        }
-#endif
+                current = itemCard;
+                var snapshot = BuildSnapshot(itemCard, order, socketId: null);
+                order++;
+                return snapshot;
+            },
+            _ => ProbeItem(current)
+        );
 
+        foreach (var failure in read.Failures)
+            AddReadException(issues, LiveCardSnapshotSection.Shop, failure, socketId: null);
+
+        result.AddRange(read.Values);
         return result;
+    }
+
+    private static ItemCard? ResolveShopItem(string entry)
+    {
+#if BPP_ANDROID
+        return Data.GetCard(entry).AsIl2Cpp<ItemCard>();
+#else
+        var instanceId = InstanceId.TryParse(entry);
+        return Data.Entities.TryGetValue(instanceId, out var card)
+            ? card.AsIl2Cpp<ItemCard>()
+            : null;
+#endif
     }
 
     private static IReadOnlyList<LiveCardSnapshot> ReadContainerItems(
@@ -100,71 +111,97 @@ internal sealed class LiveCardSnapshotReader
         if (inventory == null)
             return Array.Empty<LiveCardSnapshot>();
 
-        var container = inventory.AsIl2Cpp<CardContainer>()?.Container;
-        if (container == null)
-            return Array.Empty<LiveCardSnapshot>();
-
         var result = new List<LiveCardSnapshot>();
+        try
+        {
+            var container = inventory.AsIl2Cpp<CardContainer>()?.Container;
+            if (container == null)
+                return Array.Empty<LiveCardSnapshot>();
+
+            ReadContainerSlots(container, section, result, issues);
+        }
+        catch (Exception ex)
+        {
+            // The container root itself is unreadable; keep whatever earlier slots produced and
+            // let the other sections take their own read.
+            AddSectionReadException(issues, section, ex);
+        }
+        return result;
+    }
+
+    private static void ReadContainerSlots(
+        SocketedContainer container,
+        LiveCardSnapshotSection section,
+        List<LiveCardSnapshot> result,
+        List<LiveCardSnapshotIssue> issues
+    )
+    {
         var order = 0;
+        ItemCard? current = null;
 #if BPP_ANDROID
         var sockets = container.Sockets;
         if (sockets == null)
-            return result;
+            return;
+
         var seen = new HashSet<IntPtr>();
-        for (var i = 0; i < sockets.Length; i++)
-        {
-            var socketable = sockets[i];
-            if (socketable == null || !seen.Add(socketable.Pointer))
-                continue;
-            var socketId = (EContainerSocketId)i;
-            var itemCard = socketable.TryCast<ItemCard>();
-            if (itemCard == null)
-                continue;
-            if (!CanFitSocket(itemCard.Size, socketId))
+        var read = LiveCardSlotReader.Read<LiveCardSnapshot>(
+            sockets.Length,
+            slot =>
             {
-                issues.Add(
-                    new LiveCardSnapshotIssue(
-                        section,
-                        LiveCardSnapshotFailureReason.InvalidPlacement,
-                        itemCard.TemplateId.ToSystemGuid(),
-                        socketId,
-                        itemCard.Size,
-                        exception: null
-                    )
-                );
-                continue;
-            }
+                current = null;
+                var socketable = sockets[slot];
+                if (socketable == null || !seen.Add(socketable.Pointer))
+                    return null;
 
-            result.Add(BuildSnapshot(itemCard, order++, socketId));
-        }
+                var socketId = (EContainerSocketId)slot;
+                var itemCard = socketable.TryCast<ItemCard>();
+                if (itemCard == null)
+                    return null;
+
+                current = itemCard;
+                if (!CanFitSocket(itemCard.Size, socketId))
+                {
+                    AddInvalidPlacement(issues, section, itemCard, socketId);
+                    return null;
+                }
+
+                var snapshot = BuildSnapshot(itemCard, order, socketId);
+                order++;
+                return snapshot;
+            },
+            slot => ProbeSocket(sockets[slot])
+        );
 #else
-        foreach (var socketPair in container.GetCardsAndSockets().ToManaged())
-        {
-            var socketable = socketPair.Item1;
-            var socketId = socketPair.Item2;
-            var itemCard = socketable.TryCast<ItemCard>();
-            if (itemCard == null)
-                continue;
-            if (!CanFitSocket(itemCard.Size, socketId))
+        var pairs = container.GetCardsAndSockets().ToManaged();
+        var read = LiveCardSlotReader.Read<LiveCardSnapshot>(
+            pairs.Count,
+            slot =>
             {
-                issues.Add(
-                    new LiveCardSnapshotIssue(
-                        section,
-                        LiveCardSnapshotFailureReason.InvalidPlacement,
-                        itemCard.TemplateId.ToSystemGuid(),
-                        socketId,
-                        itemCard.Size,
-                        exception: null
-                    )
-                );
-                continue;
-            }
+                current = null;
+                var socketId = pairs[slot].Item2;
+                var itemCard = pairs[slot].Item1.AsIl2Cpp<ItemCard>();
+                if (itemCard == null)
+                    return null;
 
-            result.Add(BuildSnapshot(itemCard, order++, socketId));
-        }
+                current = itemCard;
+                if (!CanFitSocket(itemCard.Size, socketId))
+                {
+                    AddInvalidPlacement(issues, section, itemCard, socketId);
+                    return null;
+                }
+
+                var snapshot = BuildSnapshot(itemCard, order, socketId);
+                order++;
+                return snapshot;
+            },
+            slot => ProbeSocket(pairs[slot].Item1)
+        );
 #endif
 
-        return result;
+        foreach (var failure in read.Failures)
+            AddReadException(issues, section, failure, (EContainerSocketId)failure.SlotIndex);
+
+        result.AddRange(read.Values);
     }
 
     private static LiveCardSnapshot BuildSnapshot(
@@ -173,19 +210,39 @@ internal sealed class LiveCardSnapshotReader
         EContainerSocketId? socketId
     )
     {
+        string instanceId;
+        try
+        {
+            instanceId = card.InstanceId.Value ?? string.Empty;
+        }
+        catch
+        {
+            instanceId = string.Empty;
+        }
+
+        Dictionary<ECardAttributeType, int> attributes;
+        try
+        {
+            attributes =
+                card.Attributes != null
+                    ? new Dictionary<ECardAttributeType, int>(card.Attributes.ToManagedDictionary())
+                    : new Dictionary<ECardAttributeType, int>();
+        }
+        catch
+        {
+            attributes = new Dictionary<ECardAttributeType, int>();
+        }
+
         return new LiveCardSnapshot
         {
-            InstanceId = card.InstanceId.Value ?? string.Empty,
+            InstanceId = instanceId,
             TemplateId = card.TemplateId.ToSystemGuid(),
             Order = order,
             Tier = card.Tier,
             Size = card.Size,
-            EnchantmentType = card.Enchantment.ToManagedNullable(),
+            EnchantmentType = NativeCardOptionalFields.Enchantment(card),
             SocketId = socketId,
-            Attributes =
-                card.Attributes != null
-                    ? new Dictionary<ECardAttributeType, int>(card.Attributes.ToManagedDictionary())
-                    : new Dictionary<ECardAttributeType, int>(),
+            Attributes = attributes,
         };
     }
 
@@ -194,6 +251,88 @@ internal sealed class LiveCardSnapshotReader
         var span = CardSizeSpan.Resolve(size);
         return (int)socketId >= 0 && (int)socketId + span <= SocketedContainer.SocketCount;
     }
+
+    private static void AddInvalidPlacement(
+        List<LiveCardSnapshotIssue> issues,
+        LiveCardSnapshotSection section,
+        ItemCard itemCard,
+        EContainerSocketId socketId
+    )
+    {
+        var probe = ProbeItem(itemCard);
+        issues.Add(
+            new LiveCardSnapshotIssue(
+                section,
+                LiveCardSnapshotFailureReason.InvalidPlacement,
+                probe.TemplateId,
+                socketId,
+                probe.ItemSize is { } size ? (ECardSize)size : null,
+                exception: null
+            )
+        );
+    }
+
+    private static void AddReadException(
+        List<LiveCardSnapshotIssue> issues,
+        LiveCardSnapshotSection section,
+        LiveCardSlotFailure failure,
+        EContainerSocketId? socketId
+    ) =>
+        issues.Add(
+            new LiveCardSnapshotIssue(
+                section,
+                LiveCardSnapshotFailureReason.ReadException,
+                failure.Probe.TemplateId,
+                socketId,
+                failure.Probe.ItemSize is { } size ? (ECardSize)size : null,
+                failure.Exception
+            )
+        );
+
+    private static void AddSectionReadException(
+        List<LiveCardSnapshotIssue> issues,
+        LiveCardSnapshotSection section,
+        Exception exception
+    ) =>
+        issues.Add(
+            new LiveCardSnapshotIssue(
+                section,
+                LiveCardSnapshotFailureReason.ReadException,
+                templateId: null,
+                socketId: null,
+                itemSize: null,
+                exception: exception
+            )
+        );
+
+    private static LiveCardSlotProbe ProbeSocket(ISocketable? socketable) =>
+        ProbeItem(socketable.AsIl2Cpp<ItemCard>());
+
+    private static LiveCardSlotProbe ProbeItem(ItemCard? card)
+    {
+        if (card is not { } item)
+            return default;
+
+        return new LiveCardSlotProbe(
+            TryRead(() => item.TemplateId.ToSystemGuid()),
+            TryRead(() => (int)item.Size)
+        );
+    }
+
+    private static T? TryRead<T>(Func<T> read)
+        where T : struct
+    {
+        try
+        {
+            return read();
+        }
+        catch
+        {
+            // The probe only decorates a failure that is already reported; a second throw must not
+            // escape the isolation loop.
+            return null;
+        }
+    }
 }
 
 internal enum LiveCardSnapshotSection
@@ -201,6 +340,7 @@ internal enum LiveCardSnapshotSection
     All,
     Board,
     Stash,
+    Shop,
 }
 
 internal enum LiveCardSnapshotFailureReason
