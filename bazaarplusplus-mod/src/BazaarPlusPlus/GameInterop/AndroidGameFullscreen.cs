@@ -20,7 +20,7 @@ namespace BazaarPlusPlus.GameInterop;
 /// The launcher's Unity-activity onCreate hook
 /// (<c>com.bepinex.android.BootstrapActivity</c>) hides the system bars once, but they can return
 /// after focus or system-UI transitions. This
-/// component requests immersive layout once per second and on focus/size changes. The host-loaded
+/// component discovers the game activity once per second and on focus/size changes. The host-loaded
 /// Java helper owns window mutations on Android's UI thread, including supported cutout modes.
 /// The binary manifest and its theme are deliberately left untouched.
 ///
@@ -35,8 +35,8 @@ internal static class AndroidGameFullscreen
     private const string LauncherActivityName = "com.bepinex.android.bpp.BppLauncherActivity";
     private const string WindowHelperName = "com.bepinex.android.bpp.BppGameWindow";
 
-    // Re-hiding already hidden bars is a no-op; polling also repairs what Unity resets after a
-    // focus change or an orientation change.
+    // Discovery/policy-repair heartbeat. Java ignores an unchanged immersive policy and handles
+    // focus events; it must not hide transient swipe bars or redispatch insets on this cadence.
     internal const float ReapplyIntervalSeconds = 1f;
 
     // The activity is normally available before the first Update; a device that needs longer must

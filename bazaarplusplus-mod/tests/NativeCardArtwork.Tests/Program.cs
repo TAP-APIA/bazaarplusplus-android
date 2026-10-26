@@ -3,6 +3,11 @@ using BazaarPlusPlus.Game.CollectionPanel.Grid;
 using BazaarPlusPlus.GameInterop.CardPreview;
 using UnityEngine;
 
+CollectionMaterialLifetimeTests.Run();
+#if BPP_ANDROID
+InRunItemInspectionTests.Run();
+#endif
+
 foreach (
     var body in new[]
     {

@@ -10,6 +10,72 @@ TYPE_STRING = 0x03
 BPP_ACTIVITY_NAME = "com.bepinex.android.bpp.BppLauncherActivity"
 ORIG_MAIN_ACTIVITY_NAME = "com.bepinex.android.MainActivity"
 BPP_APP_LABEL = "BPP Android"
+UNITY_WINDOW_METADATA = ("unity.launch-fullscreen", "unity.render-outside-safearea")
+
+
+def patch_unity_window_metadata(axml: bytes) -> bytes:
+    """Restore Unity's original application window policy in the fused host package.
+
+    Unity resolves these through Activity.getPackageName()/PackageManager, not the
+    cloned game manifest. In particular render-outside-safearea controls both modern
+    status-bar requests and Unity's root-inset-driven FrameLayout padding.
+    """
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    existing = _parse_string_pool(axml[8:8 + pool_size])
+    required = ["meta-data", "name", "value", "http://schemas.android.com/apk/res/android", *UNITY_WINDOW_METADATA]
+    pool, strings = _rebuild_string_pool_with_appended(
+        axml[8:8 + pool_size], [s for s in required if s not in existing]
+    )
+    idx = {s: strings.index(s) for s in required}
+    # Android framework attribute IDs must also be present in the resource map.
+    chunks = [pool]
+    offset = 8 + pool_size
+    depth = 0
+    application_depth = -1
+    found = set()
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        chunk = axml[offset:offset + size]
+        if kind == 0x0180:
+            ids = list(struct.unpack_from(f"{(size - 8) // 4}I", chunk, 8))
+            ids.extend([0] * max(0, max(idx["name"], idx["value"]) + 1 - len(ids)))
+            ids[idx["name"]] = 0x01010003
+            ids[idx["value"]] = 0x01010024
+            chunk = struct.pack("<HHI", kind, 8, 8 + 4 * len(ids)) + struct.pack(f"<{len(ids)}I", *ids)
+        elif kind == RES_XML_START_ELEMENT_TYPE:
+            element, attrs = _get_start_element_info(chunk, strings)
+            if element == "application":
+                application_depth = depth
+            elif depth == application_depth + 1 and element == "meta-data" and attrs.get("name") in UNITY_WINDOW_METADATA:
+                found.add(attrs["name"])
+                mutable = bytearray(chunk)
+                # Do not preserve a previous raw string or integer type for a boolean.
+                _, header, _ = struct.unpack_from("<HHI", chunk)
+                start, width, count = struct.unpack_from("<HHH", chunk, 24)
+                for i in range(count):
+                    pos = header + start + i * width
+                    if struct.unpack_from("<I", chunk, pos + 4)[0] == idx["value"]:
+                        struct.pack_into("<IHBBI", mutable, pos + 8, 0xFFFFFFFF, 8, 0, 0x12, 0xFFFFFFFF)
+                chunk = bytes(mutable)
+            depth += 1
+        elif kind == RES_XML_END_ELEMENT_TYPE:
+            depth -= 1
+            if depth == application_depth:
+                for name in UNITY_WINDOW_METADATA:
+                    if name in found:
+                        continue
+                    ns = idx["http://schemas.android.com/apk/res/android"]
+                    attrs = struct.pack("<IIIHBBI", ns, idx["name"], idx[name], 8, 0, TYPE_STRING, idx[name])
+                    attrs += struct.pack("<IIIHBBI", ns, idx["value"], 0xFFFFFFFF, 8, 0, 0x12, 0xFFFFFFFF)
+                    chunks.append(struct.pack("<HHI4I6H", RES_XML_START_ELEMENT_TYPE, 16, 76, 0, 0xFFFFFFFF,
+                                              0xFFFFFFFF, idx["meta-data"], 20, 20, 2, 0, 0, 0) + attrs)
+                    chunks.append(struct.pack("<HHI4I", RES_XML_END_ELEMENT_TYPE, 16, 24, 0, 0xFFFFFFFF,
+                                              0xFFFFFFFF, idx["meta-data"]))
+                application_depth = -1
+        chunks.append(chunk)
+        offset += size
+    body = b"".join(chunks)
+    return struct.pack("<HHI", 3, 8, 8 + len(body)) + body
 
 
 def _encode_utf16_pool_string(text: str) -> bytes:
@@ -256,7 +322,7 @@ def patch_manifest_bytes(
     body = b"".join(out_chunks)
     total_size = 8 + len(body)
     header = struct.pack("<II", 0x00080003, total_size)
-    return header + body
+    return patch_unity_window_metadata(header + body)
 
 
 def main() -> int:
