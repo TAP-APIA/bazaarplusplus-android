@@ -32,11 +32,10 @@ ALLOWED_NEW_ENTRIES = {
     "assets/bpp-modpack-manifest.tsv",
     "classes3.dex",
 }
-SIGNATURE_FILES = {
-    "META-INF/ANDROIDD.SF",
-    "META-INF/ANDROIDD.RSA",
-    "META-INF/MANIFEST.MF",
-}
+def is_signature_file(name: str) -> bool:
+    return name.startswith("META-INF/") and (
+        name.endswith((".SF", ".RSA", ".DSA", ".EC")) or name == "META-INF/MANIFEST.MF"
+    )
 # The launcher icon is replaced by payload only: the manifest still points at the same adaptive
 # icon XML and resources.arsc keeps the same resource IDs and background color.
 ICON_ENTRIES = {
@@ -125,16 +124,16 @@ def main() -> int:
     with zipfile.ZipFile(base) as zb, zipfile.ZipFile(combined) as zc:
         base_names = set(zb.namelist())
         combined_names = set(zc.namelist())
-        missing = base_names - combined_names
+        missing = {name for name in base_names - combined_names if not is_signature_file(name)}
         if missing:
             raise SystemExit(f"Combined APK lost base entries: {sorted(missing)}")
-        new = combined_names - base_names
-        if new != ALLOWED_NEW_ENTRIES:
+        new = {name for name in combined_names - base_names if not is_signature_file(name)}
+        if new != ALLOWED_NEW_ENTRIES - base_names:
             raise SystemExit(f"Unexpected new APK entries: {sorted(new)}")
 
         native = [name for name in base_names if name.startswith("lib/") and name.endswith(".so")]
-        if len(native) != 15:
-            raise SystemExit(f"Expected 15 native libraries in base, found {len(native)}")
+        if len(native) < 15:
+            raise SystemExit(f"Expected at least 15 native libraries in base, found {len(native)}")
         for name in native:
             if zb.read(name) != zc.read(name):
                 raise SystemExit(f"Native library changed unexpectedly: {name}")
@@ -146,10 +145,10 @@ def main() -> int:
         for name in base_names:
             if name in {"AndroidManifest.xml", "assets/BepInEx.Android.zip"}:
                 continue
-            if name in SIGNATURE_FILES:
+            if is_signature_file(name) or name in ALLOWED_NEW_ENTRIES:
                 continue
             if name in ICON_ENTRIES:
-                if zb.read(name) == zc.read(name):
+                if icon_dir is None and zb.read(name) == zc.read(name):
                     raise SystemExit(f"Launcher icon was not replaced: {name}")
                 png_size(zc.read(name))
                 continue
@@ -170,6 +169,7 @@ def main() -> int:
                     name for name in zbo.namelist() if zbo.read(name) != zbz.read(name)
                 )
                 if changed not in (
+                    [],
                     ["core/Il2CppInterop.HarmonySupport.dll"],
                     ["core/Il2CppInterop.HarmonySupport.dll", "core/Il2CppInterop.Runtime.dll"],
                     ["core/Il2CppInterop.Runtime.dll"],

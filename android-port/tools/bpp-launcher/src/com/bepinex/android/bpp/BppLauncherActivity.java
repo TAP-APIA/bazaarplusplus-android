@@ -2,6 +2,7 @@ package com.bepinex.android.bpp;
 
 import android.app.Activity;
 import android.app.ActivityManager;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -9,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Process;
@@ -63,6 +65,7 @@ public final class BppLauncherActivity extends Activity {
     private static final int COLOR_STATUS_ERR = Color.parseColor("#F27A66");
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService updateWorker = Executors.newSingleThreadExecutor();
 
     private TextView tvStatusBadge;
     private TextView tvStatusHeadline;
@@ -74,6 +77,14 @@ public final class BppLauncherActivity extends Activity {
     private Button btnLaunch;
     private Button btnRepair;
     private Button btnAdvanced;
+    private TextView tvUpdateInfo;
+    private Button btnCheckUpdate;
+    private Button btnDownloadUpdate;
+    private boolean checkingUpdate;
+    private boolean updateChecked;
+    private boolean resumed;
+    private boolean updatePromptShown;
+    private BppLauncherUpdateChecker.Update availableUpdate;
 
     private volatile boolean busy;
     private volatile boolean autoLaunchConsumed;
@@ -102,6 +113,9 @@ public final class BppLauncherActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
+        if (!updateChecked) checkLauncherUpdate();
+        showLauncherUpdatePrompt();
         clearPendingCrashBanner();
         boolean requestAutoLaunch = !autoLaunchConsumed
             && getIntent() != null
@@ -113,9 +127,16 @@ public final class BppLauncherActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        resumed = false;
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         worker.shutdownNow();
+        updateWorker.shutdownNow();
     }
 
     private View buildContentView() {
@@ -327,8 +348,88 @@ public final class BppLauncherActivity extends Activity {
         infoCard.addView(tvPathInfo);
         root.addView(infoCard, infoCardLp);
 
+        LinearLayout updateCard = createCard(COLOR_CARD_SUBTLE, COLOR_GOLD_BORDER, dp(14));
+        tvUpdateInfo = createInfoLine("启动器版本：" + installedLauncherVersion());
+        tvUpdateInfo.setContentDescription("bpp_update_status");
+        updateCard.addView(tvUpdateInfo);
+        btnCheckUpdate = createActionButton("检查启动器更新", "bpp_btn_check_update",
+            COLOR_BUTTON_SECONDARY_BG, COLOR_GOLD_BORDER, COLOR_TEXT_PRIMARY, 13f, false);
+        btnCheckUpdate.setOnClickListener(v -> checkLauncherUpdate());
+        updateCard.addView(btnCheckUpdate);
+        btnDownloadUpdate = createActionButton("打开 GitHub 下载新版", "bpp_btn_download_update",
+            COLOR_BUTTON_PRIMARY_BG, COLOR_GOLD_BORDER, COLOR_GOLD, 13f, true);
+        btnDownloadUpdate.setVisibility(View.GONE);
+        btnDownloadUpdate.setOnClickListener(v -> openLauncherUpdate());
+        updateCard.addView(btnDownloadUpdate);
+        TextView updateHint = createInfoLine("仅检查本项目启动器（含预览版）；不会自动替换上游资源。覆盖安装，请勿卸载或清除数据。");
+        updateCard.addView(updateHint);
+        LinearLayout.LayoutParams updateLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        updateLp.topMargin = dp(14);
+        root.addView(updateCard, updateLp);
+
         scroll.addView(root);
         return scroll;
+    }
+
+    private String installedLauncherVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ex) {
+            return "未知";
+        }
+    }
+
+    private void checkLauncherUpdate() {
+        if (checkingUpdate || isDestroyed()) return;
+        checkingUpdate = true;
+        updateChecked = true;
+        btnCheckUpdate.setEnabled(false);
+        final String currentVersion = installedLauncherVersion();
+        tvUpdateInfo.setText("启动器 " + currentVersion + " · 正在检查 GitHub 更新…");
+        updateWorker.execute(() -> {
+            BppLauncherUpdateChecker.Update found = null;
+            String error = null;
+            try {
+                found = BppLauncherUpdateChecker.check(currentVersion);
+            } catch (Exception ex) {
+                error = "检查失败，请检查网络或稍后重试";
+                logError("Launcher update check failed", ex);
+            }
+            final BppLauncherUpdateChecker.Update result = found;
+            final String failure = error;
+            runOnUiThread(() -> {
+                if (isDestroyed() || isFinishing()) return;
+                checkingUpdate = false;
+                btnCheckUpdate.setEnabled(true);
+                availableUpdate = result;
+                btnDownloadUpdate.setVisibility(result == null ? View.GONE : View.VISIBLE);
+                tvUpdateInfo.setText("启动器 " + currentVersion + " · " + (failure != null ? failure
+                    : result == null ? "未发现更新版本（含预览版）" : "发现新版 " + result.version));
+                showLauncherUpdatePrompt();
+            });
+        });
+    }
+
+    private void showLauncherUpdatePrompt() {
+        if (!resumed || isFinishing() || isDestroyed() || availableUpdate == null || updatePromptShown) return;
+        updatePromptShown = true;
+        new AlertDialog.Builder(this)
+            .setTitle("发现启动器新版 " + availableUpdate.version)
+            .setMessage("当前版本：" + installedLauncherVersion()
+                + "\n前往本项目 GitHub Release 下载 APK 并覆盖安装。请勿卸载或清除数据，以保留配置与历史记录。")
+            .setPositiveButton("前往下载", (dialog, which) -> openLauncherUpdate())
+            .setNegativeButton("稍后", null)
+            .show();
+    }
+
+    private void openLauncherUpdate() {
+        if (availableUpdate == null) return;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(availableUpdate.releaseUrl)));
+        } catch (Exception ex) {
+            Toast.makeText(this, "无法打开浏览器，请手动访问本项目 GitHub Release", Toast.LENGTH_LONG).show();
+        }
     }
 
     private TextView createInfoLine(String text) {

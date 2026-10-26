@@ -9,6 +9,7 @@ param(
     [string]$KeyStore = '',
     [string]$KeyAlias = 'androiddebugkey',
     [int]$VersionCode = 11,
+    [string]$AndroidSdkRoot = $env:ANDROID_SDK_ROOT,
     [switch]$UnsignedOnly
 )
 
@@ -27,7 +28,7 @@ if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
 $java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java).Source }
 $javac = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/javac.exe' } else { (Get-Command javac).Source }
 
-$sdkRoot = "$env:LOCALAPPDATA\Android\Sdk"
+$sdkRoot = if ($AndroidSdkRoot) { $AndroidSdkRoot } else { "$env:LOCALAPPDATA\Android\Sdk" }
 $buildToolsDir = Get-ChildItem -LiteralPath "$sdkRoot\build-tools" -Directory |
     Sort-Object Name -Descending |
     Select-Object -First 1 -ExpandProperty FullName
@@ -103,6 +104,9 @@ try {
     & python (Join-Path $launcherToolsDir 'test_game_window.py')
     if ($LASTEXITCODE -ne 0) { throw 'Android game-window lifecycle tests failed' }
 
+    & python (Join-Path $launcherToolsDir 'test_launcher_update.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Launcher update checker tests failed' }
+
     # 2. Compile BppBundledModpackInstaller + BppLauncherActivity into classes3.dex
     $appClasses = Join-Path $workRoot 'app-classes'
     $dexOut = Join-Path $workRoot 'dex'
@@ -110,6 +114,7 @@ try {
     & $javac -encoding UTF-8 --release 11 -cp $platformJar -d $appClasses `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBundledModpackInstaller.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherUpdateChecker.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBackBridge.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java')
     if ($LASTEXITCODE -ne 0) { throw 'BppLauncherActivity compilation failed' }
@@ -207,7 +212,7 @@ with zipfile.ZipFile(source_apk, "r") as zsrc:
     patched_bep_zip = bep_out_buf.getvalue()
 
     patched_manifest = patch_manifest_bytes(
-        zsrc.read("AndroidManifest.xml"), version_code, version_name
+        zsrc.read("AndroidManifest.xml"), version_code, version_name, allow_repack=True
     )
 
     with zipfile.ZipFile(unsigned_apk_out, "w") as zdst:

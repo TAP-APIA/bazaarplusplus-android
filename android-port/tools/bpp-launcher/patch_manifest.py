@@ -208,6 +208,8 @@ def patch_manifest_bytes(
     axml: bytes,
     version_code: int | None = None,
     version_name: str | None = None,
+    *,
+    allow_repack: bool = False,
 ) -> bytes:
     if len(axml) < 16 or struct.unpack_from("<I", axml, 0)[0] != 0x00080003:
         raise ValueError("Invalid binary AndroidManifest.xml header")
@@ -217,12 +219,14 @@ def patch_manifest_bytes(
         raise ValueError("First chunk in AndroidManifest.xml is not a string pool")
 
     existing_strings = _parse_string_pool(axml[8 : 8 + pool_size])
-    if BPP_ACTIVITY_NAME in existing_strings:
-        raise ValueError("Manifest is already patched with BppLauncherActivity")
     if version_code is not None and not (0 < version_code < 0x80000000):
         raise ValueError(f"Invalid versionCode: {version_code}")
     if version_name is not None and not version_name.strip():
         raise ValueError("versionName must not be empty")
+    if BPP_ACTIVITY_NAME in existing_strings:
+        if not allow_repack:
+            raise ValueError("Manifest is already patched with BppLauncherActivity")
+        return _update_bpp_manifest_version(axml, version_code, version_name)
 
     extra_strings = [BPP_ACTIVITY_NAME, BPP_APP_LABEL]
     if version_name is not None:
@@ -323,6 +327,43 @@ def patch_manifest_bytes(
     total_size = 8 + len(body)
     header = struct.pack("<II", 0x00080003, total_size)
     return patch_unity_window_metadata(header + body)
+
+
+def _update_bpp_manifest_version(axml: bytes, version_code: int | None, version_name: str | None) -> bytes:
+    """Repackage a verified BPP host without cloning its launcher activity again."""
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    pool, strings = _rebuild_string_pool_with_appended(
+        axml[8:8 + pool_size], [version_name] if version_name is not None else []
+    )
+    chunks = [pool]
+    offset = 8 + pool_size
+    bpp_activities = 0
+    version_updated = False
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            raise ValueError("Corrupt AXML chunk during repack")
+        chunk = bytearray(axml[offset:offset + size])
+        if kind == RES_XML_START_ELEMENT_TYPE:
+            element, attrs = _get_start_element_info(chunk, strings)
+            if element == "activity" and attrs.get("name") == BPP_ACTIVITY_NAME:
+                bpp_activities += 1
+            if element == "manifest":
+                if version_code is not None and not _patch_start_element_attr(
+                    chunk, strings, "versionCode", new_int_value=version_code
+                ):
+                    raise ValueError("versionCode attribute not found")
+                if version_name is not None and not _patch_start_element_attr(
+                    chunk, strings, "versionName", new_string_idx=len(strings) - 1
+                ):
+                    raise ValueError("versionName attribute not found")
+                version_updated = True
+        chunks.append(bytes(chunk))
+        offset += size
+    if bpp_activities != 1 or not version_updated:
+        raise ValueError("Expected exactly one BppLauncherActivity and a manifest")
+    body = b"".join(chunks)
+    return patch_unity_window_metadata(struct.pack("<HHI", 3, 8, len(body) + 8) + body)
 
 
 def main() -> int:
