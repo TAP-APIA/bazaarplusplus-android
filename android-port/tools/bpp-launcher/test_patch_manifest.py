@@ -98,7 +98,7 @@ def main() -> int:
         original = zf.read("AndroidManifest.xml")
 
     patched = patch_manifest_bytes(
-        original, version_code=2, version_name="6.0.0-preview.2"
+        original, version_code=2, version_name="6.0.0-preview.2", allow_repack=True
     )
     app_label, activities = _collect_activities(patched)
     assert app_label == BPP_APP_LABEL, f"Unexpected label: {app_label}"
@@ -131,6 +131,14 @@ def main() -> int:
     except ValueError:
         double_rejected = True
     assert double_rejected, "Expected double-patching to be rejected"
+
+    repacked = patch_manifest_bytes(patched, version_code=38, version_name="6.0.0-preview.38", allow_repack=True)
+    assert _read_manifest_version(repacked) == (38, "6.0.0-preview.38")
+    assert _collect_activities(repacked) == _collect_activities(patched), "Repack changed activities or filters"
+    stable = patch_manifest_bytes(repacked, version_code=39, version_name="6.0.0", allow_repack=True)
+    assert _read_manifest_version(stable) == (39, "6.0.0")
+    assert _collect_activities(stable) == _collect_activities(patched)
+    assert _collect_metadata(stable) == _collect_metadata(patched)
 
     print("PASS: AndroidManifest binary patcher tests succeeded.")
     return 0

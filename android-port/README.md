@@ -27,6 +27,16 @@
 - **重新校验 / 修复模组**：重新校验全部内置文件；损坏或缺失时自动恢复。游戏进程运行时
   会先停止 `:game` 进程再修复。
 - **打开原版高级启动器**：保留原 BepInEx Launcher 的模组管理、日志等高级功能。
+- **检查启动器更新**：一体化首页每次新建时自动检查本仓库的 GitHub Release，也可手动重试。
+  包含 `android-v` 标签的预览版，仅提示带有已上传 `BepInExLauncher-bpp-android.apk` 的新版；
+  按版本数字比较，不按发布日期或字符串排序。检查最近 100 个 Release，草稿和无安装包版本忽略。
+  发现新版后可打开对应 GitHub 下载页，自行下载并覆盖安装；不会静默安装或替换上游资源。
+  网络失败或 GitHub 限流会显示检查失败，不会阻止启动游戏，也不会误报为“已是最新版”。
+  此功能需先安装包含更新检查的新 APK，已发布的 preview.37 不会自动获得该能力。
+
+更新检查回归测试：`python android-port/tools/bpp-launcher/test_launcher_update.py`。
+设置 `JAVA_HOME` 指向 JDK 17+；首次运行下载并校验固定 SHA-256 的 `org.json` JVM 测试依赖，
+不将此依赖打入 APK（Android 自带 JSON 实现）。加 `--live` 可另做真实 GitHub 连通性检查。
 
 ## 部署目录
 
