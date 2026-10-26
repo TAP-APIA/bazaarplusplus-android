@@ -1,3 +1,5 @@
+import struct
+import sys
 import zipfile
 from pathlib import Path
 from patch_manifest import (
@@ -6,11 +8,11 @@ from patch_manifest import (
     ORIG_MAIN_ACTIVITY_NAME,
     RES_XML_END_ELEMENT_TYPE,
     RES_XML_START_ELEMENT_TYPE,
+    UNITY_WINDOW_METADATA,
     _get_start_element_info,
     _parse_string_pool,
     patch_manifest_bytes,
 )
-import struct
 
 
 def _collect_activities(axml: bytes) -> tuple[str, list[tuple[str, str, list[str]]]]:
@@ -63,8 +65,35 @@ def _read_manifest_version(axml: bytes) -> tuple[int, str]:
     raise AssertionError("manifest element not found")
 
 
+def _collect_metadata(axml: bytes) -> dict[str, str]:
+    _, _, pool_size = struct.unpack_from("<HHI", axml, 8)
+    strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    off = 8 + pool_size
+    depth = 0
+    application_depth = -1
+    metadata: dict[str, str] = {}
+    while off < len(axml):
+        ct, ch, cs = struct.unpack_from("<HHI", axml, off)
+        chunk = axml[off : off + cs]
+        if ct == RES_XML_START_ELEMENT_TYPE:
+            el, attrs = _get_start_element_info(chunk, strings)
+            if el == "application":
+                application_depth = depth
+            elif el == "meta-data" and depth == application_depth + 1:
+                metadata[attrs.get("name", "")] = attrs.get("value", "")
+            depth += 1
+        elif ct == RES_XML_END_ELEMENT_TYPE:
+            depth -= 1
+        off += cs
+    return metadata
+
+
 def main() -> int:
-    apk_path = Path(__file__).resolve().parents[3] / "dist" / "app-bpp-fixed.apk"
+    apk_path = (
+        Path(sys.argv[1])
+        if len(sys.argv) > 1
+        else Path(__file__).resolve().parents[3] / "dist" / "app-bpp-fixed.apk"
+    )
     with zipfile.ZipFile(apk_path) as zf:
         original = zf.read("AndroidManifest.xml")
 
@@ -76,6 +105,9 @@ def main() -> int:
     version_code, version_name = _read_manifest_version(patched)
     assert version_code == 2, f"Unexpected versionCode: {version_code}"
     assert version_name == "6.0.0-preview.2", f"Unexpected versionName: {version_name}"
+    metadata = _collect_metadata(patched)
+    for name in UNITY_WINDOW_METADATA:
+        assert metadata.get(name) == "0xffffffff", f"Missing or non-boolean Unity metadata: {name}"
 
     by_name = {name: (exp, actions) for name, exp, actions in activities}
     assert BPP_ACTIVITY_NAME in by_name, "Missing BppLauncherActivity"

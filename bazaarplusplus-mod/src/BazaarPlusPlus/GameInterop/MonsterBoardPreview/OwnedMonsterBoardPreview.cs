@@ -372,7 +372,7 @@ internal sealed partial class OwnedMonsterBoardPreview : IDisposable
             throw new InvalidOperationException($"Template unavailable: {instance.TemplateId}.");
         }
         var parent = instance.AsIl2Cpp<TCardInstanceItem>() is { } item
-            ? item.SocketId.ToManagedNullable() is { } socketId
+            ? NativeBoardItemOptionalFields.Socket(item) is { } socketId
             && (int)socketId >= 0
             && (int)socketId < _view!._sockets.Length
                 ? _view!._sockets[(int)socketId]
@@ -396,7 +396,7 @@ internal sealed partial class OwnedMonsterBoardPreview : IDisposable
             await rental.Prepare(template, instance);
 #if BPP_ANDROID
             if (instance.AsIl2Cpp<TCardInstanceItem>() is { } boardItem
-                && boardItem.SocketId.ToManagedNullable() is { } boardSocket)
+                && NativeBoardItemOptionalFields.Socket(boardItem) is { } boardSocket)
             {
                 var span = GameInterop.Cards.CardSizeSpan.Resolve(template.Size);
                 rental.SetItemPlacement((int)boardSocket, span);

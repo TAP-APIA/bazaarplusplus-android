@@ -9,6 +9,7 @@ using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
 using BazaarPlusPlus.Infrastructure.UiTokens;
 using TheBazaar.Tooltips;
+using TheBazaar.UI;
 using TheBazaar.UI.Tooltips;
 using UnityEngine;
 
@@ -699,8 +700,7 @@ internal sealed class CollectionInspectionModule
             var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
             if (marker != null)
             {
-                marker.ReleaseCurrentArtKey();
-                marker.CacheOwner = null;
+                marker.ReleaseCachedArt(context.Root.GetComponent<CardPreviewBase>());
             }
             // Keep the neutral component until the pooled root is destroyed. Deferred
             // Destroy could remove a new lease's alpha gate after same-frame reuse.

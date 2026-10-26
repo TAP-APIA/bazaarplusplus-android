@@ -1,4 +1,5 @@
 #nullable enable
+using TheBazaar.UI;
 using UnityEngine;
 
 namespace BazaarPlusPlus.Game.CollectionPanel.Grid;
@@ -23,6 +24,23 @@ internal sealed class CollectionPanelOwnedMarker : MonoBehaviour
     public bool CardMaterialOwnedByCache;
     public bool TooltipRegistered;
     public Action? OnArtLoaded;
+
+    // Inspection previews share this cache without a grid PreviewOwner. Detach their borrowed
+    // material before pool return or native OnDestroy, which otherwise destroys _cardMaterial.
+    public void ReleaseCachedArt(CardPreviewBase? card)
+    {
+        if (CardMaterialOwnedByCache && card != null)
+        {
+            card._cardMaterial = null!;
+            if (card._cardImage != null)
+            {
+                card._cardImage.texture = null;
+                card._cardImage.material = null;
+            }
+        }
+        CardMaterialOwnedByCache = false;
+        ReleaseCurrentArtKey();
+    }
 
     public void ReleaseCurrentArtKey()
     {

@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(BppAndroid)' == 'true'">
@@ -24,6 +25,8 @@
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/Tooltips/NativeInspectionSizing.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/Tooltips/InspectionBackgroundPress.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/NativeMonsterBoardLayout.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/NativeBoardSignature.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/NativeBoardItemOptionalFields.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Game/LiveBuildPanel/Ui/LiveBuildPanelLayout.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Game/HistoryPanel/Ui/HistoryPanelLayout.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Game/HistoryPanel/Ui/HistoryTimelineScroll.cs" />

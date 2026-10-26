@@ -27,5 +27,8 @@ internal static class CollectionCardPreviewDestroyPatch
             return;
 
         marker.PreviewOwner?.OnNativeDestroyed(__instance);
+        // Inspection has no grid owner but borrows the same cached material. This also covers
+        // destruction during setup, before the preview session can run BeforeRelease.
+        marker.ReleaseCachedArt(__instance);
     }
 }

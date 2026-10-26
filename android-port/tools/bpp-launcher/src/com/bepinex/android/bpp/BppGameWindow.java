@@ -11,6 +11,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.ViewTreeObserver;
 import java.lang.ref.WeakReference;
 import java.util.HashSet;
 import java.util.Set;
@@ -29,6 +30,7 @@ public final class BppGameWindow {
     private static Object generation = new Object();
     private static WeakReference<Activity> loggedActivity = new WeakReference<>(null);
     private static final Set<String> loggedFailures = new HashSet<>();
+    private static WindowBinding binding;
 
     private BppGameWindow() {}
 
@@ -47,7 +49,18 @@ public final class BppGameWindow {
                         View decor = window.getDecorView();
                         // The managed cadence retries after the decor attaches.
                         if (decor == null || !decor.isAttachedToWindow()) return;
-                        applyWindow(window, decor);
+                        // The managed heartbeat only discovers/rebinds activities. Repeated hide()
+                        // and requestApplyInsets() fight transient swipe bars and resize Unity.
+                        if (binding == null || !binding.matches(activity, decor)) {
+                            if (binding != null) binding.release();
+                            applyWindow(window, decor);
+                            binding = new WindowBinding(activity, decor, token);
+                        } else if (activity.hasWindowFocus()
+                                && (decor.getSystemUiVisibility() & IMMERSIVE_FLAGS) != IMMERSIVE_FLAGS) {
+                            // Unity's player can replace legacy flags after startup/focus. Repair
+                            // requested policy only; sticky transient bars do not clear these bits.
+                            applyWindow(window, decor);
+                        }
                         if (loggedActivity.get() != activity) {
                             loggedActivity = new WeakReference<>(activity);
                             Log.i(TAG, "Window request executed on Android UI thread; activity="
@@ -67,6 +80,60 @@ public final class BppGameWindow {
         generation = new Object();
         loggedActivity.clear();
         loggedFailures.clear();
+        final WindowBinding previous = binding;
+        binding = null;
+        if (previous != null) MAIN.post(previous::release);
+    }
+
+    private static final class WindowBinding implements ViewTreeObserver.OnWindowFocusChangeListener {
+        private final WeakReference<Activity> activity;
+        private final WeakReference<View> decor;
+        private final Object token;
+
+        WindowBinding(Activity activity, View decor, Object token) {
+            this.activity = new WeakReference<>(activity);
+            this.decor = new WeakReference<>(decor);
+            this.token = token;
+            decor.getViewTreeObserver().addOnWindowFocusChangeListener(this);
+        }
+
+        boolean matches(Activity candidate, View view) {
+            return activity.get() == candidate && decor.get() == view;
+        }
+
+        @Override public void onWindowFocusChanged(boolean focused) {
+            if (!focused) return;
+            // Unity's own focus callback runs in this same dispatch and may show bars again.
+            // Apply after that dispatch, rather than winning briefly and then being overwritten.
+            MAIN.postAtTime(this::restoreAfterFocus, token, SystemClock.uptimeMillis());
+        }
+
+        private void restoreAfterFocus() {
+            synchronized (BppGameWindow.class) {
+                Activity target = activity.get();
+                View view = decor.get();
+                if (generation != token || binding != this || !isGameTarget(target)
+                        || !target.hasWindowFocus() || view == null || !view.isAttachedToWindow()) return;
+                try {
+                    // Notification shade/app switches restore immersion on return. A transient
+                    // swipe does not lose focus: Android alone times out those overlay bars.
+                    applyWindow(target.getWindow(), view);
+                    if (Build.VERSION.SDK_INT < 30) view.setSystemUiVisibility(IMMERSIVE_FLAGS);
+                } catch (RuntimeException error) {
+                    reportFailure("focus", error);
+                }
+            }
+        }
+
+        void release() {
+            View view = decor.get();
+            if (view != null) {
+                if (view.getViewTreeObserver().isAlive())
+                    view.getViewTreeObserver().removeOnWindowFocusChangeListener(this);
+            }
+            activity.clear();
+            decor.clear();
+        }
     }
 
     private static boolean isGameTarget(Activity activity) {
@@ -102,16 +169,18 @@ public final class BppGameWindow {
                 reportFailure("cutout", error);
             }
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         decor.setFitsSystemWindows(false);
         View content = decor.findViewById(android.R.id.content);
         if (content != null) content.setFitsSystemWindows(false);
-        decor.setSystemUiVisibility(IMMERSIVE_FLAGS);
-        // Modern decor-fit follows legacy flags, which otherwise conflict with edge-to-edge.
-        if (Build.VERSION.SDK_INT >= 30) Api30.apply(window, decor);
-        // Redispatch real insets, never consume them or rewrite Unity child padding/margins.
-        decor.requestApplyInsets();
-        if (content != null) content.requestApplyInsets();
+        // Unity drives legacy system-UI flags even on modern Android. Keep its requested layout
+        // in sync with the controller, but do not reassign identical flags on every heartbeat.
+        if ((decor.getSystemUiVisibility() & IMMERSIVE_FLAGS) != IMMERSIVE_FLAGS)
+            decor.setSystemUiVisibility(decor.getSystemUiVisibility() | IMMERSIVE_FLAGS);
+        if (Build.VERSION.SDK_INT >= 30) {
+            Api30.configure(window, decor);
+        } else {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        }
     }
 
     private static void reportFailure(String operation, RuntimeException error) {
@@ -119,8 +188,20 @@ public final class BppGameWindow {
     }
 
     private static final class Api30 {
-        static void apply(Window window, View decor) {
+        static void configure(Window window, View decor) {
             window.setDecorFitsSystemWindows(false);
+            // Keep the window frame at the display bounds even while swipe bars are visible.
+            // Keep real Insets intact. Unity's own root-inset padding policy is configured
+            // before player creation by patch_manifest.patch_unity_window_metadata.
+            WindowManager.LayoutParams attributes = window.getAttributes();
+            if (attributes.getFitInsetsTypes() != 0) {
+                attributes.setFitInsetsTypes(0);
+                window.setAttributes(attributes);
+            }
+            hide(decor);
+        }
+
+        static void hide(View decor) {
             WindowInsetsController controller = decor.getWindowInsetsController();
             if (controller != null) {
                 controller.setSystemBarsBehavior(

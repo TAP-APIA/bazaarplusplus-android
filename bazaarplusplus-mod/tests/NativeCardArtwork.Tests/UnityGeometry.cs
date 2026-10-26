@@ -63,6 +63,8 @@ namespace UnityEngine
             return new((parent.x - Position.x) / Scale.x, (parent.y - Position.y) / Scale.y);
         }
 
+        public void GetWorldCornersManaged(Vector3[] corners) => GetWorldCorners(corners);
+
         public void GetWorldCorners(Vector3[] corners)
         {
             var measured = rect;
@@ -77,6 +79,23 @@ namespace UnityEngine
 
     internal sealed class GameObject
     {
+        private static int _nextId;
+        private readonly int _id = ++_nextId;
+        private readonly Dictionary<Type, object> _components = new();
+
+        public int GetInstanceID() => _id;
+
+        public T? GetComponent<T>()
+            where T : class => _components.GetValueOrDefault(typeof(T)) as T;
+
+        public T AddComponent<T>()
+            where T : class, new()
+        {
+            var component = new T();
+            _components[typeof(T)] = component;
+            return component;
+        }
+
         public bool activeSelf { get; set; }
         public bool activeInHierarchy { get; set; }
     }

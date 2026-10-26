@@ -7,6 +7,10 @@
     <ProjectRoot>$(MSBuildThisFileDirectory)../../</ProjectRoot>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/BazaarPlusPlus/Patches/CollectionPanel/InRunItemClickInspectionPatch.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/Game/CollectionPanel/Grid/CollectionPanelOwnedMarker.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/Patches/CollectionPanel/CollectionCardPreviewDestroyPatch.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/GameInterop/CardPreview/NativeCardPreviewLifecycle.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/CardPreview/NativeCardPreviewArtworkMeasurement.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Game/CollectionPanel/CollectionInspectionLayout.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Game/CollectionPanel/Grid/CollectionCardFitMath.cs" />

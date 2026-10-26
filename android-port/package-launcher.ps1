@@ -97,8 +97,11 @@ try {
     & $java -cp $testClasses com.bepinex.android.bpp.BppBundledModpackInstallerTests
     if ($LASTEXITCODE -ne 0) { throw 'BppBundledModpackInstaller unit tests failed' }
 
-    & python (Join-Path $launcherToolsDir 'test_patch_manifest.py')
+    & python (Join-Path $launcherToolsDir 'test_patch_manifest.py') ([IO.Path]::GetFullPath($SourceApk))
     if ($LASTEXITCODE -ne 0) { throw 'AndroidManifest patcher tests failed' }
+
+    & python (Join-Path $launcherToolsDir 'test_game_window.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Android game-window lifecycle tests failed' }
 
     # 2. Compile BppBundledModpackInstaller + BppLauncherActivity into classes3.dex
     $appClasses = Join-Path $workRoot 'app-classes'
