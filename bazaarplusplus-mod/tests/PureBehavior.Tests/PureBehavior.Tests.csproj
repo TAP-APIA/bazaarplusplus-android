@@ -34,7 +34,12 @@
 
     <Compile Include="../../src/BazaarPlusPlus/Infrastructure/AsyncLoadCache.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Infrastructure/UiTokens/AndroidOverlayGeometry.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/Infrastructure/UiTokens/AndroidOverlayScale.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/Infrastructure/UiTokens/BppOverlaySorting.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/Infrastructure/NativeNullableResult.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/GameInterop/LiveCards/LiveCardSlotReader.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/AndroidTlsCertificateBridge.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/Patches/Android/AndroidLetterboxPatches.cs" />
     <Compile Include="../../src/BazaarPlusPlus/PluginTeardownAccumulator.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Infrastructure/RemoteEmbeddedCatalog/RemoteEmbeddedCatalogContracts.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Infrastructure/RemoteEmbeddedCatalog/RemoteEmbeddedCatalog.cs" />

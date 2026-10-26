@@ -58,3 +58,34 @@ internal static class CollectionInspectionFadeOutPatch
             BppPatchHost.Features.CollectionInspection.OnNativeClosed(__instance);
     }
 }
+
+#if BPP_ANDROID
+[HarmonyPatch(typeof(ItemController), "ProceedClick")]
+internal static class InRunItemClickInspectionPatch
+{
+    [HarmonyPrepare]
+    private static bool Prepare() =>
+        AccessTools.Method(typeof(ItemController), "ProceedClick") != null;
+
+    [HarmonyPostfix]
+    private static void Postfix(
+        ItemController __instance,
+        UnityEngine.EventSystems.PointerEventData eventData
+    )
+    {
+        if (
+            __instance == null
+            || eventData == null
+            || __instance.IsDragging
+            || __instance.IsPurchasedFromClick
+        )
+            return;
+
+        var controller = TheBazaar.Data.TooltipParentComponent?.CardTooltipController;
+        if (controller != null && !controller.IsLocked && controller.isActiveAndEnabled)
+        {
+            controller.Lock();
+        }
+    }
+}
+#endif

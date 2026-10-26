@@ -33,7 +33,7 @@ public static class ItemEnchantPreviewService
             return empty;
 
         var candidates = ItemEnchantPreviewCandidateSelector.SelectCandidates(
-            itemCard.Enchantment.ToManagedNullable(),
+            BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(itemCard),
             enchantments.ToManagedKeys(),
             restrictToEnchantmentNames
         );

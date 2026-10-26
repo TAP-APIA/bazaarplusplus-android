@@ -28,7 +28,9 @@ internal sealed class InspectionVariantPreviewState
     {
         _baseData = baseData;
         _baseCard = baseData.CardInstance;
-        _baseEnchantment = (_baseCard as ItemCard)?.Enchantment.ToManagedNullable();
+        _baseEnchantment = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(
+            _baseCard
+        );
         Options = options;
         SelectedTier = options.DefaultTier;
         SelectedEnchantment = options.DefaultEnchantment;
@@ -99,7 +101,7 @@ internal sealed class InspectionVariantPreviewState
         previewCard.Template ??= _baseData.CardTemplate;
 
         if (
-            previewCard is ItemCard previewItem
+            previewCard.AsIl2Cpp<ItemCard>() is { } previewItem
             && _baseData.CardTemplate.TryCast<TCardItem>() is { } itemTemplate
         )
         {

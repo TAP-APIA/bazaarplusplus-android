@@ -62,9 +62,19 @@
 
 - 触屏入口为深色金边竖排 BPP / 配装 / 图鉴 / 历史。长按 BPP 后拖动可移动整条入口，位置随
   `BepInEx/config/BazaarPlusPlus.cfg` 保存。任一 BPP 面板打开时入口隐藏，关闭后恢复。
+- 浮动入口底部的“字号”按钮循环切换面板文字与控件大小：100% / 150% / 200% / 250%。
+  关闭面板后调整，再打开即可查看。
+  偏好保存在同一配置的 `[OverlayUI] ScalePercent`，重启和覆盖更新后保留；只影响 BPP 图鉴、
+  历史和配装面板，不改游戏本体、原生卡牌说明或字幕已有的字号设置。
+- 超大字号下，配装页的赞助名单可独立上下滑动，关闭、更新阵容库和翻页按钮保持可见。
+- 启动器的可滚动内容避让状态栏、导航栏和屏幕开孔；横竖屏切换后重新读取系统安全边距。
+- 游戏进程通过 Android UI 线程单独隐藏系统栏并延伸到屏幕开孔区域，启动器仍保留状态栏避让。
+  Pad 上已验证 Unity 渲染面达到物理显示的 2800×1968，系统栏手势后也能恢复。
+- 应用图标使用《大巴扎》徽标的白底版本，自适应图标与旧版方形/圆形图标一并替换。
 - UI 默认跟随游戏语言，游戏未保存语言时回落系统语言。可在 `[Localization] UiLanguage`
   强制 `Chinese` / `English` / `German` / `Portuguese` / `Korean` / `Italian`。
-- 图鉴可检视卡牌、切换品质；说明层位于抽屉背景之上，保留原生滚动与遮罩。
+- 图鉴使用原生右侧说明抽屉；Pad 上已验证卡牌名称、标签、技能说明及品质/附魔切换后的更新。
+  返回键先关闭检视，再关闭图鉴，不退出游戏。
 - 十胜阵容页点击更新应成功；无进行中对局时推荐为 0/0，不等于阵容库下载失败。
 - 日志：上述目录的 `BepInEx/LogOutput.log`。正常启动包含
   `plugin.initialization.succeeded`、`plugin.android.tls.registered` 和
@@ -92,12 +102,12 @@ dotnet build .\bazaarplusplus-mod\src\BazaarPlusPlus\BazaarPlusPlus.csproj -c De
 再生成一体化 APK：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launcher.ps1 -VersionCode 3
+powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launcher.ps1 -VersionCode <递增版本号>
 ```
 
 脚本会依次调用 `package-modpack.ps1` 生成最新模组包、编译并运行安装器与 manifest 单元测试、
 生成 `classes3.dex`、重写二进制 manifest、嵌入模组清单与 ZIP、进行 16 KB 对齐和同证书签名，
-最后逐项校验基线的 native 库、DEX 与资源未被改动。
+最后逐项校验基线 native 库、原有 DEX 与资源表未改动，资源差异仅限允许替换的图标 PNG。
 
 - `-ModpackZip` 可指定现成 ZIP，跳过重新打包。
 - `-KeyStore` / `-KeyAlias` 可改用正式签名；默认使用
@@ -115,17 +125,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launc
 
 ## 当前验证与限制
 
-平板（vivo iPA2375 / Android 15）覆盖安装 `versionCode 2 → 3`，未卸载、未清除数据：
-`BepInEx/config/BazaarPlusPlus.cfg` 与 `modpacks/bpp/config/BazaarPlusPlus.cfg` 哈希前后一致；
-`modpack.json` 的 `createdAt` 保留；插件两份哈希一致；游戏启动日志包含
-`plugin.initialization.succeeded`，远端阵容库恢复 5,689 套。
+平板（vivo iPA2375 / Android 15）从早期版本一路覆盖安装到 `6.0.0-preview.30`，全程未卸载、
+未清除应用数据：`BepInEx/config/BazaarPlusPlus.cfg` 与 `modpacks/bpp/config/BazaarPlusPlus.cfg`
+哈希一致，`modpack.json` 的 `createdAt` 保留；字号档位循环测试后配置字节未变化。
 
-Android 纯行为测试 228/228、默认条件 221/221；新增安装器 Java 测试覆盖首次安装、升级、
+已在 Pad 实机验证：
+- 游戏渲染面铺满 `2800×1968`，系统栏手势后恢复；启动器仍避让状态栏。
+- 图鉴右侧使用游戏原生说明抽屉，卡名、标签、技能文本正常；品质与附魔切换会同步更新大图与说明。
+- 系统返回键先关闭卡牌检视，再关闭面板（图鉴/历史/配装均验证），不退出游戏。
+- 字号档位 100% / 150% / 200% / 250%；配装空地毯不随字号缩小，左栏可滚动，切换字号并重开面板后
+  右侧关闭、更新、翻页控件仍可见。
+- 进行中对局里配装面板可打开并读到真实对局数据（候选匹配显示 `1 / 277`）。
+
+当前工作区 Android 纯行为测试 284/284、默认条件纯行为测试 274/274；安装器 Java 测试覆盖首次安装、升级、
 配置/历史/第三方文件保留、损坏修复、路径穿越/未列出条目/哈希不符拒绝、未完成状态重试；
 manifest 测试覆盖启动 Activity 迁移、原高级界面保留和版本号；打包脚本内置 APK 完整性校验。
+
+本版新增但**尚未完成实机验收**的候选修复：
+- 图鉴偶发白图：共享材质不再在面板关闭前被中途销毁，检视大图改用图鉴美术缓存。
+- 图鉴左侧大图随字号档位继续放大（上限受左栏可用空间约束）。
+- 对局中点击物品打开左侧大图检视，可查看等级与附魔，返回键退出。
+- 触控 Dock 的“配装”按钮在战斗中不再被拦截（键盘路径已验证，触控路径待复测）。
 
 仍未完整验收：上传/账号链接/Ghost 在线同步/MP4 录制/回放重复进入；Android 回放自动清理仍关闭。
 同卡牌刚关闭后立即再次点击可能遇到空 tooltip，可先切换另一张卡。
 大元组返回值的 Harmony detour 在 ARM64 会崩溃，相关增强保持停用。
 完整桌面架构门禁仍受桌面产物与游戏程序集限制。
-问题与证据：<https://github.com/TAP-APIA/bazaarplusplus-android/issues/17>。
+问题与证据：<https://github.com/TAP-APIA/bazaarplusplus-android/issues/15>；一体化安装见 <https://github.com/TAP-APIA/bazaarplusplus-android/issues/17>。

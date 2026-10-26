@@ -72,12 +72,12 @@ internal static class AggregateItemMissingTypesTooltipPatch
 
         var staticData = BppStaticDataAccess.TryGetReadyManagerObject();
         var template = BppStaticDataAccess.GetCardTemplate(staticData, card.TemplateId.ToSystemGuid());
-        var activeEnchantment = (card as ItemCard)?.Enchantment;
+        var activeEnchantment = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(card);
         if (
             template == null
             || !AggregateItemTypeSourceResolver.TryResolve(
                 template,
-                activeEnchantment.ToManagedNullable(),
+                activeEnchantment,
                 out var source
             )
         )

@@ -19,6 +19,7 @@ internal sealed class CollectionInspectionModule
     private readonly CollectionInspectionState _state = new();
     private readonly CollectionInspectionCardAnchor _cardAnchor = new();
     private INativeCardPreviewHost? _host;
+    private INativeCardPreviewHost? _globalHost;
     private Action<bool>? _blockInput;
     private Func<Rect>? _sourceBounds;
     private CardTooltipController? _controller;
@@ -37,6 +38,9 @@ internal sealed class CollectionInspectionModule
     private float _measurementDeadline;
 
     public bool BlocksInput => _state.BlocksInput(Time.frameCount);
+    public bool IsOpen => _state.IsOpen;
+
+    internal void InitializeGlobalHost(INativeCardPreviewHost host) => _globalHost = host;
 
     public void OpenHovered(Guid templateId)
     {
@@ -83,12 +87,14 @@ internal sealed class CollectionInspectionModule
 
     public void OnLocked(CardTooltipController controller)
     {
+        var host = _host ?? _globalHost;
         if (
-            _host == null
+            host == null
             || controller == null
             || !controller.IsLocked
             || controller.CurrentTooltipData.TryCast<CardTooltipData>() is not { } data
-            || !CollectionTierTooltipRegistry.Contains(data.CardInstance)
+            || (!CollectionTierTooltipRegistry.Contains(data.CardInstance)
+                && data.CardInstance.TryCast<ItemCard>() == null)
         )
             return;
         Close();
@@ -103,7 +109,7 @@ internal sealed class CollectionInspectionModule
             _blockInput?.Invoke(true);
             _presentation = new NativeInspectionPresentation(controller);
             _previewOwner = new InspectionPreviewOwner(_presentation.CardRoot);
-            _scope = _host.OpenScope(_previewOwner);
+            _scope = host.OpenScope(_previewOwner);
             CreateVariantControls(controller, data);
             BppLog.InfoEvent(
                 new BppLogEvent(
@@ -251,14 +257,27 @@ internal sealed class CollectionInspectionModule
         // selection; otherwise switching quality would only change the text.
         _inspectionData = data;
         var card = data.CardInstance;
+        Dictionary<ECardAttributeType, int> attributes;
+        try
+        {
+            attributes =
+                card.Attributes != null
+                    ? new Dictionary<ECardAttributeType, int>(card.Attributes.ToManagedDictionary())
+                    : new Dictionary<ECardAttributeType, int>();
+        }
+        catch
+        {
+            attributes = new Dictionary<ECardAttributeType, int>();
+        }
+
         var subject = new NativeCardPreviewSubject
         {
             TemplateId = card.TemplateId.ToSystemGuid(),
             Tier = card.Tier,
-            EnchantmentType = (card as ItemCard)?.Enchantment.ToManagedNullable(),
-            Attributes = new Dictionary<BazaarGameShared.Domain.Core.Types.ECardAttributeType, int>(
-                card.Attributes.ToManagedDictionary()
+            EnchantmentType = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(
+                card
             ),
+            Attributes = attributes,
             InstanceIdPrefix = "bpp-inspection",
         };
         _ = AcquirePreviewAsync(_scope, subject, _state.Select());
@@ -397,7 +416,8 @@ internal sealed class CollectionInspectionModule
             visualWidth,
             visualHeight,
             selectorHeight,
-            VariantBarGap
+            VariantBarGap,
+            AndroidOverlayViewport.UiScale
         );
     }
 
@@ -639,7 +659,17 @@ internal sealed class CollectionInspectionModule
 
         public Transform ResolveParent(NativeCardPreviewSubject subject) => parent;
 
-        public void PrepareWhileInactive(NativeCardPreviewOwnerContext context) { }
+        public void PrepareWhileInactive(NativeCardPreviewOwnerContext context)
+        {
+            var cacheSession = CollectionCardCacheHost.ActiveSession;
+            if (cacheSession != null)
+            {
+                var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
+                if (marker == null)
+                    marker = context.Root.AddComponent<CollectionPanelOwnedMarker>();
+                marker.CacheOwner = cacheSession;
+            }
+        }
 
         public void OnAcquired(NativeCardPreviewOwnerContext context)
         {
@@ -666,6 +696,12 @@ internal sealed class CollectionInspectionModule
         {
             if (_visibility.Remove(context.Root, out var state) && state.Group != null)
                 state.Group.alpha = state.Alpha;
+            var marker = context.Root.GetComponent<CollectionPanelOwnedMarker>();
+            if (marker != null)
+            {
+                marker.ReleaseCurrentArtKey();
+                marker.CacheOwner = null;
+            }
             // Keep the neutral component until the pooled root is destroyed. Deferred
             // Destroy could remove a new lease's alpha gate after same-frame reuse.
         }

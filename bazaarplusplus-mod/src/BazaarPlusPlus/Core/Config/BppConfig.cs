@@ -60,6 +60,8 @@ internal sealed class BppConfig
 
     public ConfigEntry<float> TouchDockAnchorYConfig { get; }
 
+    public ConfigEntry<int> OverlayUiScalePercentConfig { get; }
+
     public ConfigEntry<LegendaryPositionDisplayMode> LegendaryPositionDisplayModeConfig { get; }
 
     public ConfigEntry<GraphicsUpscalingMode> GraphicsUpscalingModeConfig { get; }
@@ -217,6 +219,16 @@ internal sealed class BppConfig
             "Language for the BazaarPlusPlus UI. Auto follows the game language and falls back to the "
                 + "system language when the game stored none. English, Chinese, German, Portuguese, "
                 + "Korean, and Italian force that language."
+        );
+        OverlayUiScalePercentConfig = config.Bind(
+            "OverlayUI",
+            "ScalePercent",
+            100,
+            new ConfigDescription(
+                "Android BPP panel text and control scale, in percent. Use the touch dock UI-size "
+                    + "button to cycle sizes. Native game cards/tooltips are not scaled.",
+                new AcceptableValueRange<int>(100, 250)
+            )
         );
         // The touch dock remembers where the user dragged it: a normalized anchor of the BPP
         // toggle's centre inside the safe area. (1, 0.5) is the default right edge.

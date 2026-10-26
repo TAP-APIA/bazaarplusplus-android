@@ -166,6 +166,9 @@ internal sealed partial class CollectionPanelView : IDisposable
         _panelSettings.scaleMode = PanelScaleMode.ScaleWithScreenSize;
         _panelSettings.referenceResolution = new Vector2Int(1920, 1080);
         _panelSettings.match = 1f;
+#if BPP_ANDROID
+        _panelSettings.scale = AndroidOverlayViewport.UiScale;
+#endif
         _panelSettings.clearColor = false;
         _panelSettings.targetDisplay = 0;
         if (
@@ -729,6 +732,11 @@ internal sealed partial class CollectionPanelView : IDisposable
 #if BPP_ANDROID
         if (_root == null || _content == null)
             return;
+        if (
+            _panelSettings != null
+            && !Mathf.Approximately(_panelSettings.scale, AndroidOverlayViewport.UiScale)
+        )
+            _panelSettings.scale = AndroidOverlayViewport.UiScale;
         var pixels = AndroidOverlayViewport.ContentPixels;
         var ppp = _root.scaledPixelsPerPoint;
         if (ppp <= 0f)
@@ -741,6 +749,7 @@ internal sealed partial class CollectionPanelView : IDisposable
         _content.style.marginRight = (Screen.width - pixels.xMax) / ppp;
         _content.style.marginTop = (Screen.height - pixels.yMax) / ppp;
         _content.style.marginBottom = pixels.yMin / ppp;
+        _titleOverlay?.RefreshLayout();
 #endif
     }
 }

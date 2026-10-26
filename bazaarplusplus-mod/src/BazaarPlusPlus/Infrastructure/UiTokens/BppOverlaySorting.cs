@@ -5,18 +5,20 @@ namespace BazaarPlusPlus.Infrastructure.UiTokens;
 internal static class BppOverlaySorting
 {
 #if BPP_ANDROID
-    // On Android, the login/curtain and modal canvases sit above sortingOrder 100, so BPP's
-    // overlay panels must sit higher to be visible while keeping BppTouchEntry (32000) on top.
-    public const int PanelUiToolkit = 2600;
-    public const int NativeCardPreview = 2601;
-    public const int PanelForeground = 2602;
-    public const int InspectionBackdrop = 3000;
-    public const int InspectionControls = 3001;
-    public const int InspectionContent = 3002;
+    // Android's LetterBoxOverlays canvas sorts at 5000 even when Screen.safeArea is full-screen.
+    // Keep BPP's modal walls/content above that frame so it cannot cut off close buttons/cards.
+    // Native system popups (9999) and the touch dock (32000) still stay above the panels.
+    public const int PanelUiToolkit = 6000;
+    public const int NativeCardPreview = 6001;
+    public const int PanelForeground = 6002;
+    public const int InspectionBackdrop = 7000;
+    public const int InspectionControls = 7001;
+    public const int InspectionContent = 7002;
+
     // The inspection description is a descendant of the mobile tooltip's Scroll View, so it is
     // promoted onto its own canvas above every tray decoration. Variant chips stay above it.
-    public const int InspectionDescription = 3003;
-    public const int InspectionVariantControls = 3004;
+    public const int InspectionDescription = 7003;
+    public const int InspectionVariantControls = 7004;
 #else
     public const int PanelUiToolkit = 26;
     public const int NativeCardPreview = 27;

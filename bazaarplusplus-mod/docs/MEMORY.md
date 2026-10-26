@@ -39,6 +39,7 @@ Each of these failed silently, or reported something misleading, at least once.
 ### Game runtime
 
 - Runtime `Card` tags do not carry static template tags — hidden *and* public (`DTOUtils.CreateCard` never copies them and snapshot updates overwrite) — derive identity from template tags and static data, merging runtime+template+enchantment as `CombatImpactEntityTags` does. [`decompiled/TheBazaarRuntime/TheBazaar/DTOUtils.cs` | `src/BazaarPlusPlus/Game/PostCombatImpact/Data/CombatImpactEntityTags.cs`]
+- A generated IL2CPP `Nullable<T>` property/method return wraps an empty native value in `new Nullable<T>(IntPtr.Zero)`, which throws `NullReferenceException`; read card `Enchantment`/`Section`/`LeftSocketId` through `NativeCardOptionalFields` and other nullable returns through `NativeNullableResult`. [`src/BazaarPlusPlus/GameInterop/Cards/NativeCardOptionalFields.cs` | `src/BazaarPlusPlus/Infrastructure/NativeNullableResult.cs`]
 - Static-data lookup is fallible on degraded and test paths: catch and return a safe default, as the current resolvers do. [`src/BazaarPlusPlus/GameInterop/GameBuildInfoResolver.cs`]
 - A Harmony postfix on an `async Task` game method runs at the first await suspension, not at completion — bind pre-state in a **prefix**.
 - A programmatic native `Button.onClick` invoke can return silently through interaction gates such as `AllowInteraction` without throwing — verify the expected game-state transition before treating the action as successful.

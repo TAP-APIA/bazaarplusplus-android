@@ -163,6 +163,7 @@ internal sealed class BppComposition : IDisposable
             _postCombatImpactModule
         );
 #endif
+        _patchFeatures.CollectionInspection.InitializeGlobalHost(_nativeCardPreviewHost);
         _runLoggingModule = new RunLoggingModule(
             _services,
             PvpBattleCatalog,

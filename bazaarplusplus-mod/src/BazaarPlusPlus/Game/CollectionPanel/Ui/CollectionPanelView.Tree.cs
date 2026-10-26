@@ -177,6 +177,11 @@ internal sealed partial class CollectionPanelView
             card: false
         );
         tierSizeChipRow.style.flexWrap = Wrap.NoWrap;
+#if BPP_ANDROID
+        // Keep every size choice reachable when enlarged chrome narrows the operation rail.
+        // Wrap whole quality/size groups instead of clipping the trailing Large option.
+        tierSizeChipRow.style.flexWrap = Wrap.Wrap;
+#endif
         tierSizeChipRow.style.justifyContent = Justify.FlexStart;
         // Quality leads the combined row: the size segment hides on the Skills tab, so putting
         // it second keeps the quality chips anchored across tab switches.
@@ -185,6 +190,9 @@ internal sealed partial class CollectionPanelView
         tierSizeChipRow.Add(_tierChipRow);
         tierSizeChipRow.Add(_sizeChipRow);
         _sizeChipRow.style.marginLeft = UiSpacing.Sm;
+#if BPP_ANDROID
+        _sizeChipRow.style.marginTop = UiSpacing.Xs;
+#endif
         _tierChipRow.style.flexWrap = Wrap.NoWrap;
         _tierChipRow.style.justifyContent = Justify.FlexStart;
 

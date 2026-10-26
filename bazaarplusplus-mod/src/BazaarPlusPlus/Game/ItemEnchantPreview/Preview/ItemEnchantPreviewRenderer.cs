@@ -48,7 +48,9 @@ public static class ItemEnchantPreviewRenderer
 
             segments.Add(
                 ItemEnchantPreviewFormatting.CreateSegment(
-                    previewCard.Enchantment.ToManagedNullable() ?? EEnchantmentType.Heavy,
+                    BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(
+                        previewCard
+                    ) ?? EEnchantmentType.Heavy,
                     renderedText
                 )
             );
@@ -59,7 +61,9 @@ public static class ItemEnchantPreviewRenderer
 
     private static string RenderTooltipText(ItemCard previewCard, TLocalizableText content)
     {
-        var enchantment = previewCard.Enchantment.ToManagedNullable() ?? EEnchantmentType.Heavy;
+        var enchantment =
+            BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(previewCard)
+            ?? EEnchantmentType.Heavy;
         var localized = GetLocalizedText(content, enchantment);
         if (string.IsNullOrWhiteSpace(localized))
             return string.Empty;

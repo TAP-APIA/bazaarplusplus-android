@@ -21,8 +21,12 @@ public static class ItemEnchantPreviewCardCloneFactory
             Tier = source.Tier,
             Type = source.Type,
             Owner = source.Owner,
-            LeftSocketId = source.LeftSocketId,
-            Section = source.Section,
+            LeftSocketId = BazaarPlusPlus
+                .GameInterop.Cards.NativeCardOptionalFields.LeftSocketId(source)
+                .ToNativeNullable(),
+            Section = BazaarPlusPlus
+                .GameInterop.Cards.NativeCardOptionalFields.Section(source)
+                .ToNativeNullable(),
             State = source.State,
             Template = source.Template,
             Enchantment = snapshot.PreviewEnchantment.ToNativeNullable(),

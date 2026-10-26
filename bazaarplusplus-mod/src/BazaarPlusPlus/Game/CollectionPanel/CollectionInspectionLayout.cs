@@ -23,7 +23,8 @@ internal readonly record struct CollectionInspectionLayout(
         float visualWidth,
         float visualHeight,
         float selectorHeight,
-        float gap
+        float gap,
+        float uiScale = 1f
     )
     {
         laneWidth = Math.Max(1, laneWidth);
@@ -32,7 +33,14 @@ internal readonly record struct CollectionInspectionLayout(
         visualHeight = Math.Max(1, visualHeight);
         var padding = Math.Min(laneWidth, laneHeight) * .025f;
         var availableHeight = Math.Max(1, laneHeight - padding * 2 - selectorHeight - gap);
-        var scale = Math.Min(laneWidth * .72f / visualWidth, availableHeight / visualHeight);
+        var maxScaleX = (laneWidth - padding * 2) * .92f / visualWidth;
+        var maxScaleY = availableHeight / visualHeight;
+        var maxFitScale = Math.Min(maxScaleX, maxScaleY);
+        var baseScale = Math.Min(
+            laneWidth * .72f / visualWidth,
+            availableHeight * .82f / visualHeight
+        );
+        var scale = Math.Min(maxFitScale, baseScale * Math.Max(1f, uiScale));
         var width = visualWidth * scale;
         var height = visualHeight * scale;
         return new(

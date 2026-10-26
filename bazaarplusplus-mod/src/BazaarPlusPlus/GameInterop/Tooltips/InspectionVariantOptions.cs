@@ -90,7 +90,8 @@ internal sealed class InspectionVariantOptions
     {
         if (
             tooltipData == null
-            || !CollectionTierTooltipRegistry.Contains(tooltipData.CardInstance)
+            || (!CollectionTierTooltipRegistry.Contains(tooltipData.CardInstance)
+                && tooltipData.CardInstance.TryCast<ItemCard>() == null)
         )
             return null;
 
@@ -104,7 +105,7 @@ internal sealed class InspectionVariantOptions
             tiers,
             enchantments,
             card.Tier,
-            (card as ItemCard)?.Enchantment.ToManagedNullable()
+            BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(card)
         );
     }
 
@@ -127,10 +128,15 @@ internal sealed class InspectionVariantOptions
     private static List<InspectionEnchantChoice> BuildEnchantments(Card card)
     {
         var result = new List<InspectionEnchantChoice>();
-        if (card is not ItemCard itemCard || itemCard.GetEnchantments() is not { } enchantments)
+        if (
+            card.AsIl2Cpp<ItemCard>() is not { } itemCard
+            || itemCard.GetEnchantments() is not { } enchantments
+        )
             return result;
 
-        var current = itemCard.Enchantment.ToManagedNullable();
+        var current = BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(
+            itemCard
+        );
         var types = enchantments.ToManagedKeys().OrderBy(type => (int)type).ToArray();
         if (types.Length == 0)
             return result;
@@ -139,24 +145,14 @@ internal sealed class InspectionVariantOptions
         result.Add(new InspectionEnchantChoice(null, NoEnchantmentLabel(), current == null));
         foreach (var type in types)
         {
-            result.Add(
-                new InspectionEnchantChoice(
-                    type,
-                    EnchantmentLabel(type),
-                    current == type
-                )
-            );
+            result.Add(new InspectionEnchantChoice(type, EnchantmentLabel(type), current == type));
         }
         return result;
     }
 
     // Shared chip copy that no other owner edits; the Quality labels themselves stay in the
     // Collection panel text catalog so inspection and the filter row never disagree.
-    private static readonly LocalizedTextSet NoEnchantmentText = new(
-        "None",
-        "无",
-        "無"
-    );
+    private static readonly LocalizedTextSet NoEnchantmentText = new("None", "无", "無");
 
     private static string TierLabel(ETier tier) =>
         Game.CollectionPanel.CollectionPanelText.Tier(tier);

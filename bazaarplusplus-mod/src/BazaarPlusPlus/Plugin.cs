@@ -16,6 +16,7 @@ using BazaarPlusPlus.GameInterop.Localization;
 using BazaarPlusPlus.GameInterop.Tooltips;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
+using BazaarPlusPlus.Infrastructure.UiTokens;
 using BazaarPlusPlus.Localization;
 using BazaarPlusPlus.ModApi;
 using BazaarPlusPlus.ModApi.Clients;
@@ -108,6 +109,8 @@ public class Plugin : BaseUnityPlugin
         _host = BppGameObjectFactory.Create("BazaarPlusPlus");
         UnityEngine.Object.DontDestroyOnLoad(_host);
         BppCoroutines.InitializeMainThread();
+        // Fullscreen applies to the game process only; the launcher activity keeps its insets.
+        BazaarPlusPlus.GameInterop.AndroidGameFullscreen.Install();
 #else
     private GameObject Host => gameObject;
 
@@ -306,12 +309,22 @@ public class Plugin : BaseUnityPlugin
             ("system_language", Application.systemLanguage.ToString()),
             ("resolved", ResolveUiLanguageCode(config))
         );
+        AndroidOverlayViewport.InstallScale(() => config.OverlayUiScalePercentConfig.Value);
         BppTouchEntry.Install(
             new Vector2(config.TouchDockAnchorXConfig.Value, config.TouchDockAnchorYConfig.Value),
             anchor =>
             {
                 config.TouchDockAnchorXConfig.Value = Mathf.Clamp01(anchor.x);
                 config.TouchDockAnchorYConfig.Value = Mathf.Clamp01(anchor.y);
+            },
+            () =>
+            {
+                config.OverlayUiScalePercentConfig.Value = AndroidOverlayScale.Next(
+                    config.OverlayUiScalePercentConfig.Value
+                );
+#if BPP_ANDROID
+                AndroidModpackConfigSync.SyncBazaarPlusPlusConfig();
+#endif
             }
         );
         var attributeUnitLocalizer = BppTooltipText.TryLocalizeKeyword;
@@ -376,6 +389,11 @@ public class Plugin : BaseUnityPlugin
     {
         LegendaryPositionDisplayFormatter.Reset();
         BppTouchEntry.Reset();
+#if BPP_ANDROID
+        BazaarPlusPlus.GameInterop.AndroidGameFullscreen.Reset();
+        BazaarPlusPlus.GameInterop.AndroidBackBridge.Reset();
+#endif
+        AndroidOverlayViewport.ResetScale();
         L.Reset();
         CollectionLocalizationResolver.AttributeUnitLocalizer = null;
         EventPreviewLocalization.AttributeUnitLocalizer = null;

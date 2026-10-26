@@ -7,6 +7,7 @@ using BazaarPlusPlus.GameInterop.Fonts;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
 using BazaarPlusPlus.Infrastructure.UiTokens;
+using BazaarPlusPlus.Localization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -83,6 +84,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
     // Where the dock starts before the user ever drags it: the safe right edge, vertically centred.
     private static Vector2 _initialAnchor = new(1f, .5f);
     private static Action<Vector2>? _persistAnchor;
+    private static Action? _advanceUiScale;
+    private TextMeshProUGUI? _scaleLabel;
 
     // Last reading of the lobby gate. Reported once if the window closes, so a timeout says which
     // condition was still false instead of leaving only "the audit never ran".
@@ -112,16 +115,18 @@ internal sealed class BppTouchEntry : MonoBehaviour
 
     // Installed by Plugin before the canvas exists: the persisted anchor plus the callback that
     // writes it back once a drag ends.
-    internal static void Install(Vector2 anchor, Action<Vector2> persist)
+    internal static void Install(Vector2 anchor, Action<Vector2> persist, Action advanceUiScale)
     {
         _initialAnchor = new Vector2(Mathf.Clamp01(anchor.x), Mathf.Clamp01(anchor.y));
         _persistAnchor = persist;
+        _advanceUiScale = advanceUiScale;
     }
 
     internal static void Reset()
     {
         _initialAnchor = new Vector2(1f, .5f);
         _persistAnchor = null;
+        _advanceUiScale = null;
     }
 
     private int _raycastAuditFrames;
@@ -163,6 +168,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
             }
 
             UpdateSafeArea();
+            if (_scaleLabel != null)
+                _scaleLabel.text = ScaleLabel();
             TickDockVisibility();
             PollDockDrag();
             PollThreeFingerGesture();
@@ -593,7 +600,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
             new Vector2(0f, -rowStep),
             new Vector2(
                 AndroidOverlayGeometry.DockColumnWidth,
-                rowStep * 3f - AndroidOverlayGeometry.DockGap
+                rowStep * (AndroidOverlayGeometry.DockButtonCount - 1)
+                    - AndroidOverlayGeometry.DockGap
             )
         );
         _drawerRoot = drawerRect.gameObject;
@@ -643,6 +651,16 @@ internal sealed class BppTouchEntry : MonoBehaviour
             }
         );
 
+        _scaleLabel = CreatePillButton(
+            drawerRect,
+            "UiScaleBtn",
+            ScaleLabel(),
+            new Vector2(0f, -rowStep * 3f),
+            buttonSize,
+            new Color(0.18f, 0.14f, 0.09f, 0.92f),
+            new Color(0.96f, 0.82f, 0.46f, 1f),
+            static () => _advanceUiScale?.Invoke()
+        );
         UpdateSafeArea();
         TryApplyFont();
         BppStartupTrace.Write("touch-entry:ugui-ready");
@@ -898,7 +916,10 @@ internal sealed class BppTouchEntry : MonoBehaviour
 
     // Dark pill with a gold frame. The dock floats above the panels, so the fill keeps the label
     // readable over whatever sits underneath instead of relying on the text alone.
-    private static void CreatePillButton(
+    private static string ScaleLabel() =>
+        L.Resolve(new LocalizedTextSet("UI", "字号")) + $" {AndroidOverlayViewport.ScalePercent}%";
+
+    private static TextMeshProUGUI CreatePillButton(
         Transform parent,
         string name,
         string title,
@@ -949,6 +970,7 @@ internal sealed class BppTouchEntry : MonoBehaviour
         label.color = textColor;
         label.alignment = TextAlignmentOptions.Center;
         label.raycastTarget = false;
+        return label;
     }
 
     private static void CycleNext()

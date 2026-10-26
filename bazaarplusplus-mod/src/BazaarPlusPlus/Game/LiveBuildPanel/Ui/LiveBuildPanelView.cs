@@ -55,11 +55,47 @@ internal sealed class LiveBuildPanelView : IDisposable
     private NativeGameTypography.OwnedTextPreparation? _font;
     private GameObject? _root;
     private RectTransform? _layout;
+    private RectTransform? _overviewRoot;
+    private readonly Dictionary<BppItemBoardId, Rect> _carpetBounds = new();
+
+    // Desktop rows are always visible; Android publishes the scrolled state per frame.
+    // Intersecting rows show their carpet (it peeks past the mask); complete rows also
+    // show candidate tags, because an unmasked tag must not float over the footer.
+    private readonly Dictionary<BppItemBoardId, bool> _rowVisible = new();
+    private readonly Dictionary<BppItemBoardId, bool> _rowComplete = new();
+#if BPP_ANDROID
+    private readonly List<(TextMeshProUGUI Text, int Size)> _scaledLabels = new();
+    private int _fontPercent = -1;
+    private float _textScale = 1;
+#endif
     private RectTransform? _markerRoot;
     private Vector2 _screenSize;
     private Rect _lastSafeArea;
     private int _layoutFrames = 2;
     private RectTransform? _supporterHost;
+
+    // The left column scrolls as one unit on Android: row headers, dividers, the metric
+    // strip and the preview regions all live under _boardContent. The native previews are
+    // separate overlay canvases, so PublishRowBounds feeds them the scrolled screen rects.
+    // The content is null on desktop, which keeps the desktop row parenting unchanged.
+    private RectTransform? _boardContent = null;
+    private float _railPanelLeft = float.NaN;
+    private float _railPanelWidth = float.NaN;
+#if BPP_ANDROID
+    private RectTransform? _boardViewport;
+
+    // Last content offset whose screen rects were published. Comparing it catches a
+    // ScrollRect/LateUpdate clamp as well as the view's own drag and snap.
+    private float _publishedScroll = float.NaN;
+    private RectTransform? _supporterViewport;
+    private RectTransform? _footerRoot;
+    private Image? _footerShade;
+    private readonly List<float> _boardSnapStops = new();
+    private bool _boardPress;
+    private bool _boardDragging;
+    private Vector2 _boardPressPointer;
+    private float _boardPressOffset;
+#endif
     private RectTransform? _sidebar;
     private RectTransform? _corpusGroup;
     private RawImage? _backdrop;
@@ -114,9 +150,53 @@ internal sealed class LiveBuildPanelView : IDisposable
 
     internal event Action<BppItemBoardId, Rect>? RowBoundsChanged;
     internal bool IsCreated => _root != null;
+    internal int PresentationRevision { get; private set; }
+#if BPP_ANDROID
+    internal float BoardFooterPixels =>
+        LiveBuildPanelLayout.ReadableBoardFooterHeight * CanvasScale;
+#else
     internal float BoardFooterPixels => LiveBuildPanelLayout.BoardFooterHeight * CanvasScale;
+#endif
     internal float BoardTopPixels => LiveBuildPanelLayout.BoardTopInset * CanvasScale;
-    private float CanvasScale => _root != null ? _root.GetComponent<Canvas>().scaleFactor : 1;
+    private float CanvasScale =>
+#if BPP_ANDROID
+        // Canvas.scaleFactor can transiently report 1 during panel hide/recreation. Native
+        // previews remain in physical pixels then, so conversion must use our chosen baseline.
+        AndroidOverlayScale.CanvasFactor(
+            Screen.width,
+            Screen.height,
+            AndroidOverlayViewport.ScalePercent,
+            matchHeight: true,
+            applyPreference: false
+        );
+#else
+        _root != null ? _root.GetComponent<Canvas>().scaleFactor : 1;
+#endif
+    private Transform OverviewParent => _overviewRoot != null ? _overviewRoot : _layout!;
+    private Transform BoardParent => _boardContent != null ? _boardContent : _layout!;
+
+    // The renderer parks a preview when its row does not intersect the board viewport:
+    // a native preview canvas cannot be clipped by the uGUI mask, so a fully scrolled-out
+    // row is moved off-screen instead of being left to draw over the panel. Unknown rows
+    // are visible until the first layout publishes the real state.
+    internal bool IsRowVisible(BppItemBoardId id) =>
+        !_rowVisible.TryGetValue(id, out var visible) || visible;
+
+    // Tags are only safe on a row wholly inside the viewport: their overlay canvas is not
+    // masked, and a tag below a partial carpet would land in the footer.
+    internal bool IsRowComplete(BppItemBoardId id) =>
+        !_rowComplete.TryGetValue(id, out var complete) || complete;
+
+#if BPP_ANDROID
+    internal bool PointerReleasedThisFrame => Pointer.current?.press.wasReleasedThisFrame == true;
+
+    // A peeking preview extends below the viewport; a tap in the footer must not select a
+    // card that the mask hides.
+    internal bool BoardContainsPointer(Vector2 screenPoint) =>
+        _boardViewport == null || BoardViewportContains(screenPoint);
+#else
+    internal bool BoardContainsPointer(Vector2 screenPoint) => true;
+#endif
 
     internal void EnsureCreated()
     {
@@ -141,6 +221,9 @@ internal sealed class LiveBuildPanelView : IDisposable
         // Four stacked carpets are height-constrained; wider displays must not
         // shrink their content rail relative to the text and header actions.
         scaler.matchWidthOrHeight = 1;
+#if BPP_ANDROID
+        AndroidOverlayViewport.ApplyCanvasScale(_root, matchHeight: true, applyPreference: false);
+#endif
 
         // Full-screen backdrop and input wall preventing clicks from falling through on notch/cutout edges.
         var fullModalWall = Rect("FullModalWall", _root.transform, 0, 0, 1, 1);
@@ -175,7 +258,10 @@ internal sealed class LiveBuildPanelView : IDisposable
         frame.offsetMin = new Vector2(7, 7);
         frame.offsetMax = new Vector2(-7, -7);
         Layer(frame, 0);
-        _sidebar = Rect("Overview", _layout, 0, 0, 0, 0);
+#if BPP_ANDROID
+        _overviewRoot = Rect("OverviewChrome", _layout, 0, 0, 0, 0);
+#endif
+        _sidebar = Rect("Overview", OverviewParent, 0, 0, 0, 0);
         var sidebarRule = Rect("SidebarRule", _sidebar, 0, 0, 0, 1);
         sidebarRule.sizeDelta = new Vector2(1, 0);
         var sidebarRuleImage = sidebarRule.gameObject.AddComponent<Image>();
@@ -187,21 +273,62 @@ internal sealed class LiveBuildPanelView : IDisposable
             divider.sizeDelta = new Vector2(0, 1);
             divider.gameObject.AddComponent<Image>().color = new Color(.58f, .43f, .20f, .5f);
         }
-        _title = Text(_layout, string.Empty, .02f, .008f, .49f, .05f, 32);
+        _title = Text(OverviewParent, string.Empty, .02f, .008f, .49f, .05f, 32);
         _title.textWrappingMode = TextWrappingModes.Normal;
+#if BPP_ANDROID
+        // At large UI sizes the complete attribution no longer fits beside four boards. Keep
+        // its text size and scroll it independently, without moving the close/refresh/navigation.
+        _supporterViewport = Rect("SupporterViewport", OverviewParent, 0, 0, 0, 0);
+        _supporterViewport.gameObject.AddComponent<RectMask2D>();
+        var supporterHitArea = _supporterViewport.gameObject.AddComponent<Image>();
+        supporterHitArea.color = Color.clear;
+        _supporterHost = Rect("SupporterAttribution", _supporterViewport, 0, 0, 1, 0);
+        _supporterHost.pivot = new Vector2(0, 1);
+        _supporterHost.anchoredPosition = Vector2.zero;
+        _supporterHost.sizeDelta = new Vector2(0, 240);
+        var supporterScroll = _supporterViewport.gameObject.AddComponent<ScrollRect>();
+        supporterScroll.viewport = _supporterViewport;
+        supporterScroll.content = _supporterHost;
+        supporterScroll.horizontal = false;
+        supporterScroll.vertical = true;
+        supporterScroll.movementType = ScrollRect.MovementType.Clamped;
+#else
         _supporterHost = Rect("SupporterAttribution", _layout, .02f, .048f, .65f, .027f);
+#endif
         _supporters = new BPPSupporterNativeAttributionRow(
             _supporterHost,
             _font!,
             TextAnchor.UpperLeft,
             stacked: true
         );
-        _corpusGroup = Rect("BuildLibrary", _layout, 0, 0, 0, 0);
+        _corpusGroup = Rect("BuildLibrary", OverviewParent, 0, 0, 0, 0);
         _corpusTitle = Text(_corpusGroup, "", 0, 0, 0, 0, 15);
         _corpus = Text(_corpusGroup, "", 0, 0, 0, 0, 14, Muted);
         _corpus.textWrappingMode = TextWrappingModes.Normal;
         _refreshButton = Button(_corpusGroup, "", 0, 0, 0, 0, _refresh, size: 14);
-        _closeButton = Button(_layout, "", .943f, .027f, .044f, .045f, _close);
+        _closeButton = Button(OverviewParent, "", .943f, .027f, .044f, .045f, _close);
+#if BPP_ANDROID
+        // The four boards keep a minimum height and scroll inside this viewport. The mask
+        // clips the row chrome; native previews are parked by the renderer when a row is not
+        // wholly visible because their separate overlay canvases cannot be stencil-masked.
+        _boardViewport = Rect("BoardViewport", _layout, 0, 0, 0, 0);
+        _boardViewport.gameObject.AddComponent<RectMask2D>();
+        _boardContent = Rect("BoardContent", _boardViewport, 0, 0, 1, 0);
+        _boardContent.anchorMin = new Vector2(0, 1);
+        _boardContent.anchorMax = new Vector2(1, 1);
+        _boardContent.pivot = new Vector2(.5f, 1);
+        _boardContent.anchoredPosition = Vector2.zero;
+        _boardContent.sizeDelta = new Vector2(0, 1000);
+        var boardScroll = _boardViewport.gameObject.AddComponent<ScrollRect>();
+        boardScroll.viewport = _boardViewport;
+        boardScroll.content = _boardContent;
+        boardScroll.horizontal = false;
+        boardScroll.vertical = true;
+        boardScroll.movementType = ScrollRect.MovementType.Clamped;
+        // Touch is driven by LiveBuildPanelView.TickBoardScroll: a native preview card
+        // would otherwise eat the drag before uGUI's ScrollRect sees it.
+        boardScroll.inertia = false;
+#endif
         // Four peers always share the same board dimensions. Native carpet aspect and
         // ten sockets determine card scale; sparse sources never grow individual cards.
         var ids = new[]
@@ -215,14 +342,14 @@ internal sealed class LiveBuildPanelView : IDisposable
         {
             var y = .103f + i * .205f + (i > 0 ? .033f : 0);
             var row = new Row { Index = i };
-            row.Divider = Rect("RowDivider", _layout, 0, 0, 0, 0);
+            row.Divider = Rect("RowDivider", BoardParent, 0, 0, 0, 0);
             var divider = row.Divider.gameObject.AddComponent<Image>();
             divider.color =
                 i == 0 ? new Color(.72f, .54f, .24f, .8f) : new Color(.58f, .43f, .20f, .3f);
             divider.raycastTarget = false;
-            row.Header = Rect("RowHeader", _layout, .02f, y, .96f, .024f);
+            row.Header = Rect("RowHeader", BoardParent, .02f, y, .96f, .024f);
             row.Title = Text(row.Header, "", 0, 0, .50f, 1, 18);
-            row.Region = Rect(ids[i].ToString(), _layout, .02f, y + .033f, .96f, .17f);
+            row.Region = Rect(ids[i].ToString(), BoardParent, .02f, y + .033f, .96f, .17f);
             row.Status = Text(row.Header, "", .4f, 0, .60f, 1, 14, Muted);
             row.Status.alignment = TextAlignmentOptions.MidlineRight;
             _rows.Add(ids[i], row);
@@ -233,12 +360,12 @@ internal sealed class LiveBuildPanelView : IDisposable
         _portrait.preserveAspect = true;
         _portrait.raycastTarget = false;
         _portrait.color = Color.clear;
-        _navigationLabel = Text(_layout, "", 0, 0, 0, 0, 17);
+        _navigationLabel = Text(OverviewParent, "", 0, 0, 0, 0, 17);
         _previousButton = NavigationButton(_previous, forward: false);
-        _pager = Text(_layout, "", 0, 0, 0, 0, 17, Ink, true);
+        _pager = Text(OverviewParent, "", 0, 0, 0, 0, 17, Ink, true);
         _nextButton = NavigationButton(_next, forward: true);
         // One fixed cell per metric: a run-on line silently ellipsized the last one away.
-        _metrics = Rect("MatchMetrics", _layout, 0, 0, 0, 0);
+        _metrics = Rect("MatchMetrics", BoardParent, 0, 0, 0, 0);
         for (var cell = 0; cell < LiveBuildPanelLayout.MetricCells; cell++)
         {
             var slot = Rect(
@@ -252,8 +379,26 @@ internal sealed class LiveBuildPanelView : IDisposable
             _metricLabels[cell] = Text(slot, "", 0, 0, 1, .42f, 11, Muted);
             _metricValues[cell] = Text(slot, "", 0, .42f, 1, .58f, 16);
         }
-        _guidance = Text(_layout, "", 0, 0, 0, 0, 14, Muted);
+        _guidance = Text(BoardParent, "", 0, 0, 0, 0, 14, Muted);
+#if BPP_ANDROID
+        // A peeking carpet extends past the scroll mask into the footer; the native preview
+        // sorts above the panel, so the hint needs its own canvas above the preview to stay
+        // readable. The hint never moves horizontally, so a full-panel host keeps Place()'s
+        // panel coordinates intact.
+        _footerRoot = Rect("FooterChrome", _layout, 0, 0, 1, 1);
+        var footerCanvas = _footerRoot.gameObject.AddComponent<Canvas>();
+        footerCanvas.overrideSorting = true;
+        footerCanvas.sortingOrder = BppOverlaySorting.PanelForeground;
+        // The shade gives the hint a readable base where a peeking carpet would otherwise
+        // show through, and it is also the clean bottom edge of the board column.
+        _footerShade = Rect("FooterShade", _footerRoot, 0, 0, 1, 0)
+            .gameObject.AddComponent<Image>();
+        _footerShade.color = new Color(.10f, .07f, .04f, .94f);
+        _footerShade.raycastTarget = false;
+        _hint = Text(_footerRoot, "", .02f, .969f, .96f, .022f, 12, Muted, true);
+#else
         _hint = Text(_layout, "", .02f, .969f, .96f, .022f, 12, Muted, true);
+#endif
         _markerRoot = Rect("CandidateMarkers", _root.transform, 0, 0, 1, 1);
         var foreground = _markerRoot.gameObject.AddComponent<Canvas>();
         foreground.overrideSorting = true;
@@ -279,7 +424,13 @@ internal sealed class LiveBuildPanelView : IDisposable
         if (_root != null)
             _root.SetActive(visible);
         if (!visible)
+        {
             ClearMarkers();
+#if BPP_ANDROID
+            _boardPress = false;
+            _boardDragging = false;
+#endif
+        }
     }
 
     internal void Refresh(LiveBuildPanelSnapshot snapshot)
@@ -442,6 +593,26 @@ internal sealed class LiveBuildPanelView : IDisposable
         }
         var screen = new Vector2(Screen.width, Screen.height);
         var safeArea = Screen.safeArea;
+#if BPP_ANDROID
+        if (
+            _root != null
+            && AndroidOverlayViewport.ApplyCanvasScale(
+                _root,
+                matchHeight: true,
+                applyPreference: false
+            )
+        )
+        {
+            // Screen-pixel rail bounds are stale even when the canvas-unit layout did not
+            // change. Force the renderer to re-read the carpet and re-fit its pixel regions.
+            _carpetBounds.Clear();
+            _layoutFrames = 2;
+            PresentationRevision++;
+        }
+        if (_fontPercent != AndroidOverlayViewport.ScalePercent)
+            _layoutFrames = 2;
+        TickBoardScroll();
+#endif
         var viewportChanged = ApplySafeAreaInsets();
         if (_screenSize != screen || _lastSafeArea != safeArea || viewportChanged)
         {
@@ -449,27 +620,24 @@ internal sealed class LiveBuildPanelView : IDisposable
             _lastSafeArea = safeArea;
             _layoutFrames = 2;
         }
-        if (_layoutFrames > 0)
+        var relaidOut = _layoutFrames > 0;
+        if (relaidOut)
         {
             _layoutFrames--;
             Canvas.ForceUpdateCanvases();
             UpdateLayout();
-            foreach (var pair in _rows)
-            {
-                pair.Value.Region.GetWorldCornersManaged(_corners);
-                var bounds = UnityEngine.Rect.MinMaxRect(
-                    _corners[0].x,
-                    _corners[0].y,
-                    _corners[2].x,
-                    _corners[2].y
-                );
-                if (bounds.width > 1 && bounds.height > 1 && bounds != pair.Value.Bounds)
-                {
-                    pair.Value.Bounds = bounds;
-                    RowBoundsChanged?.Invoke(pair.Key, bounds);
-                }
-            }
         }
+#if BPP_ANDROID
+        var scrollOffset = _boardContent?.anchoredPosition.y ?? 0;
+        if (relaidOut || !Mathf.Approximately(scrollOffset, _publishedScroll))
+        {
+            _publishedScroll = scrollOffset;
+            PublishRowBounds();
+        }
+#else
+        if (relaidOut)
+            PublishRowBounds();
+#endif
         _corpusDetail!.transform.parent.gameObject.SetActive(
             Pointer.current != null
                 && RectTransformUtility.RectangleContainsScreenPoint(
@@ -478,6 +646,177 @@ internal sealed class LiveBuildPanelView : IDisposable
                 )
         );
     }
+
+    // Publish the row rects in screen pixels: the native preview canvases live outside the
+    // scrolling panel canvas, so they need the scrolled world rect, not the content-local one.
+    private void PublishRowBounds()
+    {
+#if BPP_ANDROID
+        var viewport = default(Rect);
+        if (_boardViewport != null)
+        {
+            _boardViewport.GetWorldCornersManaged(_corners);
+            viewport = UnityEngine.Rect.MinMaxRect(
+                _corners[0].x,
+                _corners[0].y,
+                _corners[2].x,
+                _corners[2].y
+            );
+        }
+#endif
+        foreach (var pair in _rows)
+        {
+            var row = pair.Value;
+            row.Region.GetWorldCornersManaged(_corners);
+            var bounds = UnityEngine.Rect.MinMaxRect(
+                _corners[0].x,
+                _corners[0].y,
+                _corners[2].x,
+                _corners[2].y
+            );
+            if (bounds.width <= 1 || bounds.height <= 1)
+                continue;
+#if BPP_ANDROID
+            // Visibility follows the carpet region, not the header above it: a header can peek
+            // in while the board is still below the mask, and tags belong to the board alone.
+            // Update before the event so SetBounds parks or restores the right preview.
+            _rowVisible[pair.Key] = IsRowIntersecting(bounds.yMax, bounds.yMin, viewport);
+            _rowComplete[pair.Key] = IsRowFullyInside(bounds.yMax, bounds.yMin, viewport);
+#endif
+            if (bounds != row.Bounds)
+            {
+                row.Bounds = bounds;
+                RowBoundsChanged?.Invoke(pair.Key, bounds);
+            }
+        }
+    }
+
+#if BPP_ANDROID
+    private static bool IsRowIntersecting(float rowTop, float rowBottom, Rect viewport)
+    {
+        if (viewport.height <= 0)
+            return true;
+        const float tolerance = 1.5f;
+        return rowBottom <= viewport.yMax + tolerance && rowTop >= viewport.yMin - tolerance;
+    }
+
+    private static bool IsRowFullyInside(float rowTop, float rowBottom, Rect viewport)
+    {
+        if (viewport.height <= 0)
+            return true;
+        const float tolerance = 1.5f;
+        if (rowTop - rowBottom <= viewport.height)
+            return rowTop <= viewport.yMax + tolerance && rowBottom >= viewport.yMin - tolerance;
+        // A row taller than the viewport can never be wholly visible; keep its tags reachable
+        // by treating it as complete when it covers the viewport.
+        return rowTop >= viewport.yMax - tolerance && rowBottom <= viewport.yMin + tolerance;
+    }
+
+    private void BuildBoardSnapStops()
+    {
+        _boardSnapStops.Clear();
+        var max = _geometry.BoardMaxScroll;
+        if (max <= .5f)
+            return;
+        // 0 keeps the initial (unscrolled) position stable for taps; the row tops make each
+        // full row land at the viewport top; max reveals the last row against the footer.
+        _boardSnapStops.Add(0);
+        foreach (var row in _rows.Values)
+            _boardSnapStops.Add(Mathf.Clamp(_geometry.TitleTop(row.Index) - 8, 0, max));
+        _boardSnapStops.Add(max);
+        _boardSnapStops.Sort();
+    }
+
+    private float NearestBoardStop(float offset)
+    {
+        var best = offset;
+        var distance = float.MaxValue;
+        foreach (var stop in _boardSnapStops)
+        {
+            var candidate = Mathf.Abs(stop - offset);
+            if (candidate >= distance)
+                continue;
+            distance = candidate;
+            best = stop;
+        }
+        return best;
+    }
+
+    private bool BoardViewportContains(Vector2 screenPoint)
+    {
+        if (
+            _boardViewport == null
+            || !RectTransformUtility.RectangleContainsScreenPoint(_boardViewport, screenPoint, null)
+        )
+            return false;
+        // The viewport is the whole left column; the four peer carpets share one narrower
+        // rail. Starting a drag on the overview's left edge must not scroll the boards.
+        if (!_carpetBounds.TryGetValue(BppItemBoardId.FinalBuild, out var carpet))
+            return true;
+        return screenPoint.x >= carpet.xMin - 1 && screenPoint.x <= carpet.xMax + 1;
+    }
+
+    // Touch drags are read from the pointer directly: a native preview card sits in its own
+    // overlay canvas above this one and would consume uGUI drag events before the ScrollRect.
+    private void TickBoardScroll()
+    {
+        if (_boardContent == null || _geometry.Width <= 0)
+            return;
+        var pointer = Pointer.current;
+        var position = pointer?.position.ReadValue();
+        var pressed = pointer?.press.isPressed == true;
+        var before = _boardContent.anchoredPosition.y;
+        if (
+            pointer != null
+            && pointer.press.wasPressedThisFrame
+            && position is { } press
+            && BoardViewportContains(press)
+        )
+        {
+            _boardPress = true;
+            _boardDragging = false;
+            _boardPressPointer = press;
+            _boardPressOffset = before;
+        }
+        if (_boardPress)
+        {
+            if (pressed && position is { } current)
+            {
+                if (
+                    !_boardDragging
+                    && Mathf.Abs(current.y - _boardPressPointer.y)
+                        > LiveBuildPanelLayout.BoardDragThresholdPixels
+                )
+                    _boardDragging = true;
+                if (_boardDragging)
+                {
+                    var scale = Mathf.Max(.001f, CanvasScale);
+                    var offset = Mathf.Clamp(
+                        _boardPressOffset + (current.y - _boardPressPointer.y) / scale,
+                        0,
+                        _geometry.BoardMaxScroll
+                    );
+                    _boardContent.anchoredPosition = new Vector2(0, offset);
+                }
+            }
+            else
+            {
+                _boardPress = false;
+                _boardDragging = false;
+            }
+        }
+        if (!pressed && !_boardPress && _geometry.BoardMaxScroll > .5f)
+        {
+            var offset = _boardContent.anchoredPosition.y;
+            var target = NearestBoardStop(offset);
+            if (Mathf.Abs(offset - target) > .25f)
+                _boardContent.anchoredPosition = new Vector2(
+                    0,
+                    Mathf.MoveTowards(offset, target, Time.unscaledDeltaTime * 2600f)
+                );
+        }
+    }
+#endif
 
     internal void SetBoardStatus(
         BppItemBoardId id,
@@ -506,76 +845,145 @@ internal sealed class LiveBuildPanelView : IDisposable
     private void UpdateLayout()
     {
         var size = _layout!.rect.size;
-        if (size.x <= 1 || size.y <= 1 || size == _layoutSize)
+        var presentationChanged = false;
+#if BPP_ANDROID
+        presentationChanged = _fontPercent != AndroidOverlayViewport.ScalePercent;
+#endif
+        if (size.x <= 1 || size.y <= 1 || (size == _layoutSize && !presentationChanged))
             return;
+        if (size != _layoutSize)
+            _carpetBounds.Clear();
         _layoutSize = size;
+#if BPP_ANDROID
+        _fontPercent = AndroidOverlayViewport.ScalePercent;
+        _textScale = AndroidOverlayViewport.UiScale;
+        foreach (var entry in _scaledLabels)
+            ApplyTextScale(entry.Text, entry.Size);
+        _geometry = new LiveBuildPanelLayout(
+            size.x,
+            size.y,
+            ReadableChrome: true,
+            ChromeScale: _textScale
+        );
+        var scrollOffset = _boardContent != null ? _boardContent.anchoredPosition.y : 0;
+        Place(
+            _boardViewport!,
+            _geometry.BoardLeft,
+            _geometry.BoardViewportTop,
+            _geometry.BoardWidth,
+            _geometry.BoardViewportHeight
+        );
+        _boardContent!.sizeDelta = new Vector2(0, _geometry.BoardContentHeight);
+        _boardContent.anchoredPosition = new Vector2(
+            0,
+            Mathf.Clamp(scrollOffset, 0, _geometry.BoardMaxScroll)
+        );
+        BuildBoardSnapStops();
+#else
         _geometry = new LiveBuildPanelLayout(size.x, size.y);
-        foreach (var row in _rows.Values)
+#endif
+        PresentationRevision++;
+        _railPanelLeft = float.NaN;
+        _railPanelWidth = float.NaN;
+        var boardLeft = _boardContent != null ? 0f : _geometry.BoardLeft;
+        foreach (var pair in _rows)
         {
+            var row = pair.Value;
             Place(
                 row.Region,
-                _geometry.BoardLeft,
+                boardLeft,
                 _geometry.BoardTop(row.Index),
                 _geometry.BoardWidth,
                 _geometry.BoardHeight
             );
-            ApplyBoardRail(row, _geometry.BoardLeft, _geometry.BoardWidth);
+            if (_carpetBounds.TryGetValue(pair.Key, out var carpet))
+                SetBoardRail(pair.Key, carpet);
+            else
+                ApplyBoardRail(row, boardLeft, _geometry.BoardWidth);
         }
+        var overviewLeft = _geometry.BoardLeft;
+        var overviewWidth = _geometry.BoardWidth;
+        if (_carpetBounds.TryGetValue(BppItemBoardId.FinalBuild, out var recommendationCarpet))
+        {
+            overviewLeft = PanelLeftOf(recommendationCarpet);
+            overviewWidth = recommendationCarpet.width / CanvasScale;
+        }
+        ApplyHeaderRail(overviewLeft, overviewWidth);
     }
+
+    // Screen pixels -> the board parent's top-left-relative units. On Android the parent is
+    // the scrolling content, so the same value also positions the row chrome under the mask.
+    private float LocalLeftOf(Rect screenBounds)
+    {
+        var parent = _boardContent != null ? _boardContent : _layout!;
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            parent,
+            screenBounds.min,
+            null,
+            out var local
+        );
+        return local.x - parent.rect.xMin;
+    }
+
+    // Screen pixels -> panel-left-relative units. The scrolling content starts at BoardLeft,
+    // so its local rail has to be shifted back to the panel frame the overview lives in.
+    private float PanelLeftOf(Rect screenBounds) =>
+        LocalLeftOf(screenBounds) + (_boardContent != null ? _geometry.BoardLeft : 0);
 
     internal void SetBoardRail(BppItemBoardId id, Rect screenBounds)
     {
         if (_layout == null || screenBounds.width <= 1)
             return;
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            _layout,
-            screenBounds.min,
-            null,
-            out var left
-        );
+        _carpetBounds[id] = screenBounds;
         // Only text follows the loaded carpet. Feeding these bounds back into the
         // preview region would shrink the board again on each layout pass.
-        ApplyBoardRail(_rows[id], left.x - _layout.rect.xMin, screenBounds.width / CanvasScale);
+        var width = screenBounds.width / CanvasScale;
+        ApplyBoardRail(_rows[id], LocalLeftOf(screenBounds), width);
+        if (id != BppItemBoardId.FinalBuild)
+            return;
+        var panelLeft = PanelLeftOf(screenBounds);
+        if (
+            float.IsFinite(_railPanelLeft)
+            && Mathf.Abs(panelLeft - _railPanelLeft) <= .5f
+            && Mathf.Abs(width - _railPanelWidth) <= .5f
+        )
+            return;
+        _railPanelLeft = panelLeft;
+        _railPanelWidth = width;
+        ApplyHeaderRail(panelLeft, width);
     }
 
     private void ApplyBoardRail(Row row, float left, float width)
     {
         Place(row.Divider, left, _geometry.TitleTop(row.Index) - 8, width, row.Index == 0 ? 2 : 1);
-        Place(
-            row.Header,
-            left,
-            _geometry.TitleTop(row.Index),
-            width,
-            LiveBuildPanelLayout.RowTitleHeight
-        );
+        Place(row.Header, left, _geometry.TitleTop(row.Index), width, _geometry.HeaderRowHeight);
+#if BPP_ANDROID
+        var portrait = Mathf.Min(24 * _textScale, Mathf.Max(1, _geometry.HeaderRowHeight - 2));
+        var titleLeft = row.Index == 0 ? portrait + 6 : 0;
+#else
+        const float portrait = 24;
         var titleLeft = row.Index == 0 ? 30 : 0;
+#endif
         var titleWidth = Mathf.Min(230, width * .38f);
-        Place(
-            row.Title.rectTransform,
-            titleLeft,
-            0,
-            titleWidth,
-            LiveBuildPanelLayout.RowTitleHeight
-        );
+        Place(row.Title.rectTransform, titleLeft, 0, titleWidth, _geometry.HeaderRowHeight);
         var statusLeft = titleLeft + titleWidth + 10;
         Place(
             row.Status.rectTransform,
             statusLeft,
             0,
             Mathf.Max(1, width - statusLeft),
-            LiveBuildPanelLayout.RowTitleHeight
+            _geometry.HeaderRowHeight
         );
         if (row.Index != 0)
             return;
-        ApplyHeaderRail(left, width);
-        Place(_portrait!.rectTransform, 0, 2, 24, 24);
-        Place(_metrics!, left, _geometry.MetricsTop, width, LiveBuildPanelLayout.MetricsHeight);
+        Place(_portrait!.rectTransform, 0, 2, portrait, portrait);
+        Place(_metrics!, left, _geometry.MetricsTop, width, _geometry.MetricRowHeight);
         Place(
             _guidance!.rectTransform,
             left,
             _geometry.MetricsTop,
             width,
-            LiveBuildPanelLayout.MetricsHeight
+            _geometry.MetricRowHeight
         );
     }
 
@@ -584,54 +992,125 @@ internal sealed class LiveBuildPanelView : IDisposable
         var sidebarLeft = _geometry.SidebarLeft(left, width);
         var contentLeft = sidebarLeft + 24;
         var contentWidth = LiveBuildPanelLayout.SidebarWidth - 48;
-        Place(_sidebar!, sidebarLeft, 20, LiveBuildPanelLayout.SidebarWidth, _geometry.Height - 40);
-        Place(_title!.rectTransform, contentLeft, 42, contentWidth - 80, 64);
+        var overviewGeometry = _geometry;
+        var overviewLeft = sidebarLeft;
+#if BPP_ANDROID
+        // The board rail reserves ReadableSidebarScaleMax; the overview must not grow past
+        // that reservation or it would cover the carpet (or leave the panel).
+        var overviewScale = Mathf.Min(_textScale, LiveBuildPanelLayout.ReadableSidebarScaleMax);
+        overviewGeometry = new LiveBuildPanelLayout(
+            LiveBuildPanelLayout.SidebarWidth,
+            _geometry.Height / overviewScale
+        );
+        Place(
+            _overviewRoot!,
+            sidebarLeft,
+            0,
+            LiveBuildPanelLayout.SidebarWidth,
+            overviewGeometry.Height
+        );
+        _overviewRoot!.localScale = new Vector3(overviewScale, overviewScale, 1);
+        contentLeft = 24;
+        overviewLeft = 0;
+#endif
+        Place(
+            _sidebar!,
+            overviewLeft,
+            20,
+            LiveBuildPanelLayout.SidebarWidth,
+            overviewGeometry.Height - 40
+        );
+        var compact = overviewGeometry.Height < 800;
+        Place(_title!.rectTransform, contentLeft, compact ? 24 : 42, contentWidth - 80, 64);
         Place(
             _closeButton!.transform.RequireRectTransform(),
             contentLeft + contentWidth - 68,
-            58,
+            compact ? 40 : 58,
             68,
             32
         );
-        Place(_corpusGroup!, contentLeft, 156, contentWidth, 128);
+        Place(_corpusGroup!, contentLeft, overviewGeometry.CorpusTop, contentWidth, 128);
         Place(_corpusTitle!.rectTransform, 0, 14, contentWidth - 108, 28);
         Place(_refreshButton!.transform.RequireRectTransform(), contentWidth - 94, 14, 94, 28);
         Place(_corpus!.rectTransform, 0, 56, contentWidth, 60);
         _corpus.alignment = TextAlignmentOptions.TopLeft;
-        Place(_navigationLabel!.rectTransform, contentLeft, 492, contentWidth - 116, 28);
-        Place(_pager!.rectTransform, contentLeft + contentWidth - 104, 492, 104, 28);
+        Place(
+            _navigationLabel!.rectTransform,
+            contentLeft,
+            overviewGeometry.NavigationTop,
+            contentWidth - 116,
+            28
+        );
+        Place(
+            _pager!.rectTransform,
+            contentLeft + contentWidth - 104,
+            overviewGeometry.NavigationTop,
+            104,
+            28
+        );
         _pager.alignment = TextAlignmentOptions.MidlineRight;
         var navigationButtonWidth = (contentWidth - 12) / 2;
         Place(
             _previousButton!.transform.RequireRectTransform(),
             contentLeft,
-            536,
+            overviewGeometry.NavigationTop + 44,
             navigationButtonWidth,
             56
         );
         Place(
             _nextButton!.transform.RequireRectTransform(),
             contentLeft + navigationButtonWidth + 12,
-            536,
+            overviewGeometry.NavigationTop + 44,
             navigationButtonWidth,
             56
         );
-        Place(_supporterHost!, contentLeft, _geometry.Height - 286, contentWidth, 240);
-        // Anchored under the line it explains, not at a fixed offset over the boards.
+#if BPP_ANDROID
         Place(
-            _corpusDetail!.transform.parent.RequireRectTransform(),
+            _supporterViewport!,
             contentLeft,
-            290,
+            overviewGeometry.SupportersTop,
             contentWidth,
-            110
+            overviewGeometry.SupportersViewportHeight
         );
+        // Do not reset anchoredPosition: it is the user's current scroll offset.
+        _supporterHost!.sizeDelta = new Vector2(0, 240);
+#else
+        Place(_supporterHost!, contentLeft, _geometry.SupportersTop, contentWidth, 240);
+#endif
+        // Anchored under the line it explains, not at a fixed offset over the boards.
+        var detail = _corpusDetail!.transform.parent.RequireRectTransform();
+#if BPP_ANDROID
+        // Detail owns a foreground canvas outside OverviewChrome; convert the local overview
+        // point through screen pixels so safe-area offsets and the chrome scale apply once.
+        var screen = RectTransformUtility.WorldToScreenPoint(
+            null,
+            _overviewRoot!.TransformPoint(
+                new Vector3(contentLeft, -(overviewGeometry.CorpusTop + 134), 0)
+            )
+        );
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            _markerRoot!,
+            screen,
+            null,
+            out var local
+        );
+        detail.anchorMin = detail.anchorMax = new Vector2(.5f, .5f);
+        detail.pivot = new Vector2(0, 1);
+        detail.anchoredPosition = local;
+        detail.sizeDelta = new Vector2(contentWidth * _textScale, 110 * _textScale);
+#else
+        Place(detail, contentLeft, _geometry.CorpusTop + 134, contentWidth, 110);
+#endif
+#if BPP_ANDROID
         Place(
-            _hint!.rectTransform,
+            _footerShade!.rectTransform,
             left,
             _geometry.FooterTop,
             width,
-            LiveBuildPanelLayout.FooterHeight
+            _geometry.ChromeFooterHeight
         );
+#endif
+        Place(_hint!.rectTransform, left, _geometry.FooterTop, width, _geometry.ChromeFooterHeight);
     }
 
     private static void Place(RectTransform rect, float left, float top, float width, float height)
@@ -672,7 +1151,11 @@ internal sealed class LiveBuildPanelView : IDisposable
         target.anchoredPosition = local;
         target.sizeDelta = new Vector2(
             Mathf.Clamp(bounds.width / scale * .68f, 42, 72),
+#if BPP_ANDROID
+            LiveBuildPanelLayout.ReadableBadgeHeight
+#else
             LiveBuildPanelLayout.BadgeHeight
+#endif
         );
         target.gameObject.SetActive(true);
     }
@@ -770,7 +1253,7 @@ internal sealed class LiveBuildPanelView : IDisposable
 
     private Button NavigationButton(Action click, bool forward)
     {
-        var button = Button(_layout!, null, 0, 0, 0, 0, click);
+        var button = Button(OverviewParent, null, 0, 0, 0, 0, click);
         var rect = Rect("Chevron", button.transform, .5f, .5f, 0, 0);
         rect.pivot = new Vector2(.5f, .5f);
         rect.sizeDelta = new Vector2(20, 32);
@@ -802,6 +1285,14 @@ internal sealed class LiveBuildPanelView : IDisposable
         text.fontSizeMin = size * .8f;
         text.fontSizeMax = size;
         text.enableAutoSizing = true;
+#if BPP_ANDROID
+        // The view factory owns authored sizes. TMP's current fontSize may already be autofitted.
+        if (_overviewRoot == null || (parent != _overviewRoot && !parent.IsChildOf(_overviewRoot)))
+        {
+            _scaledLabels.Add((text, size));
+            ApplyTextScale(text, size);
+        }
+#endif
         text.color = color ?? Ink;
         text.alignment = center ? TextAlignmentOptions.Center : TextAlignmentOptions.MidlineLeft;
         text.textWrappingMode = TextWrappingModes.NoWrap;
@@ -809,6 +1300,14 @@ internal sealed class LiveBuildPanelView : IDisposable
         text.raycastTarget = false;
         return text;
     }
+
+#if BPP_ANDROID
+    private void ApplyTextScale(TextMeshProUGUI text, int size)
+    {
+        text.fontSize = text.fontSizeMax = size * _textScale;
+        text.fontSizeMin = size * .8f;
+    }
+#endif
 
     private bool ApplySafeAreaInsets()
     {

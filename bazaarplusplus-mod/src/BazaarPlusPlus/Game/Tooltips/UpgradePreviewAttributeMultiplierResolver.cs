@@ -124,9 +124,10 @@ internal static class UpgradePreviewAttributeMultiplierResolver
         }
 
         if (
-            card is ItemCard { Enchantment: not null } item
+            card.AsIl2Cpp<ItemCard>() is { } item
+            && BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Enchantment(item) is { } enchantmentType
             && item.Template.TryCast<TCardItem>() is { } itemTemplate
-            && itemTemplate.TryGetEnchantmentTemplate(item.Enchantment.Value, out var enchantment)
+            && itemTemplate.TryGetEnchantmentTemplate(enchantmentType, out var enchantment)
             && enchantment != null
         )
         {
@@ -164,9 +165,9 @@ internal static class UpgradePreviewAttributeMultiplierResolver
             && (
                 aura.ActiveIn switch
                 {
-                    EEffectActiveIn.HandOnly => auraSource.Section.ToManagedNullable() != EInventorySection.Hand,
-                    EEffectActiveIn.StashOnly => auraSource.Section.ToManagedNullable() != EInventorySection.Stash,
-                    EEffectActiveIn.HandAndStash => auraSource.Section == null,
+                    EEffectActiveIn.HandOnly => BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(auraSource) != EInventorySection.Hand,
+                    EEffectActiveIn.StashOnly => BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(auraSource) != EInventorySection.Stash,
+                    EEffectActiveIn.HandAndStash => BazaarPlusPlus.GameInterop.Cards.NativeCardOptionalFields.Section(auraSource) == null,
                     _ => false,
                 }
             )
