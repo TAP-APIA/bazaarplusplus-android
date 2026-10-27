@@ -14,6 +14,11 @@ public final class BppGameApplication extends Application {
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
         try {
+            BppJitTrace.install(base);
+        } catch (Throwable t) {
+            BppGameProcess.logEvent(base, "BppGameApplication.attachBaseContext BppJitTrace.install failed", t);
+        }
+        try {
             BppGameProcess.start(base, "BppGameApplication.attachBaseContext");
         } catch (Throwable t) {
             BppGameProcess.logEvent(base, "BppGameApplication.attachBaseContext start failed", t);

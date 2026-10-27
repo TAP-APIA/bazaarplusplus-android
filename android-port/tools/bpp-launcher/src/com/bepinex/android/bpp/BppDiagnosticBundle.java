@@ -94,11 +94,17 @@ public final class BppDiagnosticBundle {
         public final File file;
         public final String archivePath;
         public final boolean logTail;
+        public final int maxBytes;
 
         public ExtraFile(File file, String archivePath, boolean logTail) {
+            this(file, archivePath, logTail, 0);
+        }
+
+        public ExtraFile(File file, String archivePath, boolean logTail, int maxBytes) {
             this.file = file;
             this.archivePath = archivePath;
             this.logTail = logTail;
+            this.maxBytes = maxBytes;
         }
     }
 
@@ -165,6 +171,7 @@ public final class BppDiagnosticBundle {
             + "- logcat/          点导出时能读到的各 buffer 转储\n"
             + "- logs/            BepInEx LogOutput、preloader、BPP trace、Unity Player.log、配置、可读 tombstone\n"
             + "- crashes/         getHistoricalProcessExitReasons（含 :game）和 trace；系统 tombstone 目录若不可读会记在 manifest\n"
+            + "- jit/             jit-stdout.log=JitDisasmSummary（最后一行是最后完成编译的方法，崩溃方法正在其后再编译）；coreclr-stderr.log=CoreCLR stderr（fatal/assert）；jit-*.nettrace=EventPipe JIT 事件（MethodJittingStarted，用 PerfView 或 `dotnet-trace convert` 打开）；jit-trace-env.txt=环境变量与 fd 指向\n"
             + "- state/           启动器 SharedPreferences 与 DataStore\n"
             + "\n"
             + "manifest.txt 的 [unavailable] 表示当时读不到，不代表手机上一定没有这个文件。\n"
@@ -699,7 +706,7 @@ public final class BppDiagnosticBundle {
                 unavailable.add(label + "/" + relative + "\trejected-archive-path");
                 continue;
             }
-            addSliceForFile(slices, budget, omitted, child, archive, modeFor(relative, name), logTailBytes, smallTextMax);
+            addSliceForFile(slices, budget, omitted, child, archive, modeFor(relative, name), logTailBytes, smallTextMax, 0);
         }
     }
 
@@ -735,7 +742,17 @@ public final class BppDiagnosticBundle {
         String canonical = canonical(extra.file);
         if (canonical != null && !seenFiles.add(canonical)) return;
         Mode mode = extra.logTail ? Mode.TAIL : modeFor(archive, extra.file.getName());
-        addSliceForFile(slices, budget, omitted, extra.file, archive, mode, logTailBytes, smallTextMax);
+        int capOverride = 0;
+        if (extra.maxBytes > 0) {
+            long size = extra.file.length();
+            if (size > extra.maxBytes) {
+                omitted.add(archive + "\tskipped-over-cap\t" + size);
+                return;
+            }
+            capOverride = extra.maxBytes;
+            if (!extra.logTail) mode = Mode.FULL;
+        }
+        addSliceForFile(slices, budget, omitted, extra.file, archive, mode, logTailBytes, smallTextMax, capOverride);
     }
 
     private static void addSliceForFile(
@@ -746,7 +763,8 @@ public final class BppDiagnosticBundle {
         String archive,
         Mode mode,
         int logTailBytes,
-        int smallTextMax
+        int smallTextMax,
+        int capOverride
     ) {
         long size;
         try {
@@ -756,6 +774,7 @@ public final class BppDiagnosticBundle {
             return;
         }
         int cap = mode == Mode.TAIL ? logTailBytes : smallTextMax;
+        if (capOverride > 0) cap = capOverride;
         if (cap < 1) cap = 1;
         long offset = 0L;
         long length = size;
