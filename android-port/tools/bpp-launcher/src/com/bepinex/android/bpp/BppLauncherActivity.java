@@ -103,6 +103,11 @@ public final class BppLauncherActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        try {
+            android.util.Log.i("BppGame", BppBuildInfo.describe());
+        } catch (Throwable t) {
+            android.util.Log.w("BppGame", "BppBuildInfo.describe failed", t);
+        }
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         // Target SDK 35 enforces edge-to-edge on newer Android versions. Keep the background
         // edge-to-edge, but inset the scrolling viewport (not its child) so scrolled text never
@@ -1373,3 +1378,4 @@ public final class BppLauncherActivity extends Activity {
         );
     }
 }
+

@@ -131,8 +131,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launc
 - `-ModpackZip` 可指定现成 ZIP，跳过重新打包。
 - `-KeyStore` / `-KeyAlias` 可改用正式签名；默认使用
   `%USERPROFILE%\.android\debug.keystore` 的 `androiddebugkey`。
-- `-VersionCode` 每次发布必须递增；默认 `41`，版本名 `6.0.0-preview.41`（已安装过的 preview.40 是 `40`）。
-  默认输出 `dist/BepInExLauncher-bpp-android.apk`。
+- `-VersionCode` 每次发布必须递增；默认 `42`，版本名 `6.0.0-preview.42`
+  （preview.41 是 `41`，preview.40 是 `40`）。默认输出
+  `dist/BepInExLauncher-bpp-android.apk`。
 - `-UnsignedOnly` 只生成对齐后的未签名 APK。
 
 发布时只需上传 APK、本说明和 SHA-256；不要再附带单独的模组 ZIP 或 ADB 部署脚本。
@@ -172,3 +173,4 @@ manifest 测试覆盖启动 Activity 迁移、原高级界面保留和版本号�
 大元组返回值的 Harmony detour 在 ARM64 会崩溃，相关增强保持停用。
 完整桌面架构门禁仍受桌面产物与游戏程序集限制。
 问题与证据：<https://github.com/TAP-APIA/bazaarplusplus-android/issues/15>；一体化安装见 <https://github.com/TAP-APIA/bazaarplusplus-android/issues/17>。
+

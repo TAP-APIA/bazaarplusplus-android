@@ -5,7 +5,9 @@ from pathlib import Path
 RES_STRING_POOL_TYPE = 0x0001
 RES_XML_START_ELEMENT_TYPE = 0x0102
 RES_XML_END_ELEMENT_TYPE = 0x0103
+RES_XML_RESOURCE_MAP_TYPE = 0x0180
 TYPE_STRING = 0x03
+ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 BPP_ACTIVITY_NAME = "com.bepinex.android.bpp.BppLauncherActivity"
 ORIG_MAIN_ACTIVITY_NAME = "com.bepinex.android.MainActivity"
@@ -42,7 +44,7 @@ def patch_unity_window_metadata(axml: bytes) -> bytes:
     while offset < len(axml):
         kind, _, size = struct.unpack_from("<HHI", axml, offset)
         chunk = axml[offset:offset + size]
-        if kind == 0x0180:
+        if kind == RES_XML_RESOURCE_MAP_TYPE:
             ids = list(struct.unpack_from(f"{(size - 8) // 4}I", chunk, 8))
             ids.extend([0] * max(0, max(idx["name"], idx["value"]) + 1 - len(ids)))
             ids[idx["name"]] = 0x01010003
@@ -159,6 +161,170 @@ def _rebuild_string_pool_with_appended(chunk: bytes, extra_strings: list[str]) -
     )
     offsets_bytes = b"".join(struct.pack("<I", off) for off in new_offsets)
     return header + offsets_bytes + blob, all_strings
+
+
+def _read_resource_map(axml: bytes) -> list[int]:
+    offset = 8
+    while offset + 8 <= len(axml):
+        kind, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            raise ValueError("Corrupt AXML chunk while reading the resource map")
+        if kind == RES_XML_RESOURCE_MAP_TYPE:
+            if header_size < 8 or header_size > size:
+                raise ValueError("Invalid resource map chunk header")
+            count = (size - header_size) // 4
+            if header_size + count * 4 != size:
+                raise ValueError("Invalid resource map chunk size")
+            if count == 0:
+                return []
+            return list(struct.unpack_from(f"<{count}I", axml, offset + header_size))
+        offset += size
+    raise ValueError("AndroidManifest.xml is missing the resource map chunk")
+
+
+def _resource_id_for_name(name_index: int, resource_map: list[int]) -> int | None:
+    if 0 <= name_index < len(resource_map):
+        resource_id = resource_map[name_index]
+        return resource_id if resource_id else None
+    return None
+
+
+def _mapped_string_index(strings: list[str], resource_map: list[int], value: str) -> int:
+    for index, text in enumerate(strings):
+        if text == value and index < len(resource_map) and resource_map[index] != 0:
+            return index
+    raise ValueError(
+        f"Android attribute name {value!r} is missing a resource id in the manifest resource map"
+    )
+
+
+def _sort_start_element_attributes(chunk: bytes, resource_map: list[int]) -> bytes:
+    kind, header_size, size = struct.unpack_from("<HHI", chunk, 0)
+    if kind != RES_XML_START_ELEMENT_TYPE:
+        return chunk
+    if len(chunk) < 36:
+        raise ValueError("Truncated start element chunk")
+    _line, _comment, _ns, _name, attr_start, attr_size, attr_count = struct.unpack_from(
+        "<IIIIHHH", chunk, 8
+    )
+    id_index, class_index, style_index = struct.unpack_from("<HHH", chunk, 30)
+    if attr_count == 0:
+        return chunk
+    if attr_size < 20:
+        raise ValueError(f"Unsupported AXML attribute record size {attr_size}")
+    base = header_size + attr_start
+    end = base + attr_count * attr_size
+    if base < header_size or end > len(chunk):
+        raise ValueError("Start element attribute list is out of bounds")
+
+    records = [
+        chunk[base + i * attr_size : base + (i + 1) * attr_size]
+        for i in range(attr_count)
+    ]
+
+    def sort_key(record: bytes) -> tuple[int, int]:
+        name_index = struct.unpack_from("<I", record, 4)[0]
+        resource_id = _resource_id_for_name(name_index, resource_map)
+        if resource_id is None:
+            return (1, 0)
+        return (0, resource_id)
+
+    order = sorted(range(attr_count), key=lambda i: sort_key(records[i]))
+    if order == list(range(attr_count)):
+        return chunk
+
+    updated = bytearray(chunk)
+    updated[base:end] = b"".join(records[i] for i in order)
+    new_positions = {old: new for new, old in enumerate(order)}
+
+    def remap(index: int) -> int:
+        if index == 0:
+            return 0
+        if 1 <= index <= attr_count:
+            return new_positions[index - 1] + 1
+        return index
+
+    struct.pack_into(
+        "<HHH",
+        updated,
+        30,
+        remap(id_index),
+        remap(class_index),
+        remap(style_index),
+    )
+    return bytes(updated)
+
+
+def sort_element_attributes(axml: bytes) -> bytes:
+    """Sort every element's attributes by Android resource id.
+
+    Android's ResXMLParser / obtainAttributes requires attributes to be sorted
+    ascending by resource id. Attributes without a resource id are placed after all
+    mapped attributes while preserving their relative order.
+    """
+    resource_map = _read_resource_map(axml)
+    updated = bytearray(axml)
+    offset = 8
+    while offset < len(updated):
+        kind, _header_size, size = struct.unpack_from("<HHI", updated, offset)
+        if size < 8 or offset + size > len(updated):
+            raise ValueError("Corrupt AXML chunk while sorting attributes")
+        if kind == RES_XML_START_ELEMENT_TYPE:
+            updated[offset : offset + size] = _sort_start_element_attributes(
+                bytes(updated[offset : offset + size]), resource_map
+            )
+        offset += size
+    return bytes(updated)
+
+
+def verify_attribute_order(axml: bytes) -> list[str]:
+    """Return descriptions of elements whose attributes are not sorted by resource id."""
+    problems: list[str] = []
+    try:
+        resource_map = _read_resource_map(axml)
+        pool_size = struct.unpack_from("<I", axml, 12)[0]
+        strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    except ValueError as exc:
+        return [str(exc)]
+
+    offset = 8
+    while offset < len(axml):
+        if offset + 8 > len(axml):
+            problems.append(f"Truncated AXML chunk at offset {offset}")
+            break
+        kind, _header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            problems.append(f"Corrupt AXML chunk at offset {offset}")
+            break
+        if kind == RES_XML_START_ELEMENT_TYPE:
+            chunk = axml[offset : offset + size]
+            try:
+                _kind, header_size, _size = struct.unpack_from("<HHI", chunk, 0)
+                _line, _comment, _ns, name, attr_start, attr_size, attr_count = struct.unpack_from(
+                    "<IIIIHHH", chunk, 8
+                )
+                if attr_count and attr_size < 20:
+                    raise ValueError(f"Unsupported AXML attribute record size {attr_size}")
+                base = header_size + attr_start
+                end = base + attr_count * attr_size
+                if attr_count and (base < header_size or end > len(chunk)):
+                    raise ValueError("Start element attribute list is out of bounds")
+                keys: list[tuple[int, int]] = []
+                for i in range(attr_count):
+                    record_offset = base + i * attr_size
+                    attr_name_index = struct.unpack_from("<I", chunk, record_offset + 4)[0]
+                    resource_id = _resource_id_for_name(attr_name_index, resource_map)
+                    keys.append((0, resource_id) if resource_id is not None else (1, 0))
+                if keys != sorted(keys):
+                    element_name = strings[name] if 0 <= name < len(strings) else f"#{name}"
+                    problems.append(
+                        f"<{element_name}> attributes are not sorted by resource id "
+                        f"at chunk 0x{offset:x}"
+                    )
+            except (struct.error, ValueError) as exc:
+                problems.append(f"Invalid start element at offset {offset}: {exc}")
+        offset += size
+    return problems
 
 
 def _patch_start_element_attr(
@@ -374,9 +540,10 @@ def _update_bpp_manifest_version(axml: bytes, version_code: int | None, version_
 
 def _install_game_process_hooks(axml: bytes) -> bytes:
     """Hooks that must run inside :game while Cpp2IL generates on the grey screen."""
-    return ensure_generation_service(
+    axml = ensure_generation_service(
         ensure_game_application(ensure_game_process_provider(patch_unity_window_metadata(axml)))
     )
+    return sort_element_attributes(axml)
 
 
 def _with_extra_strings(axml: bytes, extra: list[str]) -> tuple[bytes, list[str]]:
@@ -390,7 +557,15 @@ def _with_extra_strings(axml: bytes, extra: list[str]) -> tuple[bytes, list[str]
     return struct.pack("<HHI", 3, 8, len(body) + 8) + body, strings
 
 
-def _append_element_attr(chunk: bytes, strings: list[str], attr_name: str, raw: int, typ: int, data: int) -> bytes:
+def _append_element_attr(
+    chunk: bytes,
+    strings: list[str],
+    resource_map: list[int],
+    attr_name: str,
+    raw: int,
+    typ: int,
+    data: int,
+) -> bytes:
     kind, header_size, size = struct.unpack_from("<HHI", chunk, 0)
     if kind != RES_XML_START_ELEMENT_TYPE:
         raise ValueError("Cannot append an attribute to a non-element chunk")
@@ -402,8 +577,8 @@ def _append_element_attr(chunk: bytes, strings: list[str], attr_name: str, raw: 
         raise ValueError("Attribute list extends past its element chunk")
     attr = struct.pack(
         "<IIIHBBI",
-        strings.index("http://schemas.android.com/apk/res/android"),
-        strings.index(attr_name),
+        strings.index(ANDROID_NS),
+        _mapped_string_index(strings, resource_map, attr_name),
         raw,
         8,
         0,
@@ -437,6 +612,7 @@ def ensure_game_application(axml: bytes) -> bytes:
     axml, strings = _with_extra_strings(axml, [GAME_APPLICATION])
     if _has_component(axml, "application", GAME_APPLICATION):
         return axml
+    resource_map = _read_resource_map(axml)
     class_index = strings.index(GAME_APPLICATION)
     pool_size = struct.unpack_from("<I", axml, 12)[0]
     parts: list[bytes] = []
@@ -452,7 +628,9 @@ def ensure_game_application(axml: bytes) -> bytes:
             if element == "application":
                 if attrs.get("name"):
                     return axml
-                chunk = _append_element_attr(chunk, strings, "name", class_index, TYPE_STRING, class_index)
+                chunk = _append_element_attr(
+                    chunk, strings, resource_map, "name", class_index, TYPE_STRING, class_index
+                )
                 found = True
         parts.append(chunk)
         offset += size
@@ -478,12 +656,12 @@ def _has_provider(axml: bytes, class_name: str) -> bool:
     return False
 
 
-def _provider_element(strings: list[str]) -> tuple[bytes, bytes]:
-    ns = strings.index("http://schemas.android.com/apk/res/android")
-    name_i = strings.index("name")
-    exported_i = strings.index("exported")
-    authorities_i = strings.index("authorities")
-    process_i = strings.index("process")
+def _provider_element(strings: list[str], resource_map: list[int]) -> tuple[bytes, bytes]:
+    ns = strings.index(ANDROID_NS)
+    name_i = _mapped_string_index(strings, resource_map, "name")
+    exported_i = _mapped_string_index(strings, resource_map, "exported")
+    authorities_i = _mapped_string_index(strings, resource_map, "authorities")
+    process_i = _mapped_string_index(strings, resource_map, "process")
     provider_i = strings.index("provider")
     class_i = strings.index(GAME_PROCESS_PROVIDER)
     authority_i = strings.index(GAME_PROCESS_AUTHORITY)
@@ -531,6 +709,7 @@ def ensure_game_process_provider(axml: bytes) -> bytes:
     """Declare the :game diagnostics provider. Repacking an already patched manifest must keep it."""
     if _has_provider(axml, GAME_PROCESS_PROVIDER):
         return axml
+    resource_map = _read_resource_map(axml)
     pool_size = struct.unpack_from("<I", axml, 12)[0]
     existing = _parse_string_pool(axml[8 : 8 + pool_size])
     extra = [
@@ -542,7 +721,7 @@ def ensure_game_process_provider(axml: bytes) -> bytes:
     for required in ("name", "exported", "authorities", "process", "provider", ":game"):
         if required not in strings:
             raise ValueError(f"Manifest is missing the {required} string needed for the game provider")
-    start, end = _provider_element(strings)
+    start, end = _provider_element(strings, resource_map)
     chunks = [pool]
     offset = 8 + pool_size
     inserted = False
@@ -565,11 +744,18 @@ def ensure_game_process_provider(axml: bytes) -> bytes:
     return struct.pack("<HHI", 3, 8, len(body) + 8) + body
 
 
-def _android_attr(strings: list[str], name: str, raw: int, typ: int, data: int) -> bytes:
+def _android_attr(
+    strings: list[str],
+    resource_map: list[int],
+    name: str,
+    raw: int,
+    typ: int,
+    data: int,
+) -> bytes:
     return struct.pack(
         "<IIIHBBI",
-        strings.index("http://schemas.android.com/apk/res/android"),
-        strings.index(name),
+        strings.index(ANDROID_NS),
+        _mapped_string_index(strings, resource_map, name),
         raw,
         8,
         0,
@@ -610,7 +796,7 @@ def _xml_end(name_index: int) -> bytes:
     )
 
 
-def _generation_service_chunks(strings: list[str]) -> bytes:
+def _generation_service_chunks(strings: list[str], resource_map: list[int]) -> bytes:
     for required in ("service", "property", "name", "exported", "process", "foregroundServiceType", "value", ":game"):
         if required not in strings:
             raise ValueError(f"Manifest is missing the {required} string needed for the generation service")
@@ -621,14 +807,14 @@ def _generation_service_chunks(strings: list[str]) -> bytes:
     property_name = strings.index(FGS_PROPERTY)
     property_value = strings.index(FGS_SUBTYPE)
     service_attrs = b"".join([
-        _android_attr(strings, "name", class_index, TYPE_STRING, class_index),
-        _android_attr(strings, "exported", 0xFFFFFFFF, 0x12, 0),
-        _android_attr(strings, "process", game_index, TYPE_STRING, game_index),
-        _android_attr(strings, "foregroundServiceType", 0xFFFFFFFF, 0x11, 0x40000000),
+        _android_attr(strings, resource_map, "name", class_index, TYPE_STRING, class_index),
+        _android_attr(strings, resource_map, "exported", 0xFFFFFFFF, 0x12, 0),
+        _android_attr(strings, resource_map, "process", game_index, TYPE_STRING, game_index),
+        _android_attr(strings, resource_map, "foregroundServiceType", 0xFFFFFFFF, 0x11, 0x40000000),
     ])
     property_attrs = b"".join([
-        _android_attr(strings, "name", property_name, TYPE_STRING, property_name),
-        _android_attr(strings, "value", property_value, TYPE_STRING, property_value),
+        _android_attr(strings, resource_map, "name", property_name, TYPE_STRING, property_name),
+        _android_attr(strings, resource_map, "value", property_value, TYPE_STRING, property_value),
     ])
     return b"".join([
         _xml_start(service_index, service_attrs, 4),
@@ -643,7 +829,8 @@ def ensure_generation_service(axml: bytes) -> bytes:
     if _has_component(axml, "service", GAME_SERVICE):
         return axml
     axml, strings = _with_extra_strings(axml, [GAME_SERVICE, FGS_PROPERTY, FGS_SUBTYPE, ":game"])
-    blob = _generation_service_chunks(strings)
+    resource_map = _read_resource_map(axml)
+    blob = _generation_service_chunks(strings, resource_map)
     pool_size = struct.unpack_from("<I", axml, 12)[0]
     parts: list[bytes] = []
     offset = 8 + pool_size
@@ -677,10 +864,21 @@ def main() -> int:
     out_path = Path(sys.argv[2])
     version_code = int(sys.argv[3]) if len(sys.argv) == 5 else None
     version_name = sys.argv[4] if len(sys.argv) == 5 else None
-    patched = patch_manifest_bytes(in_path.read_bytes(), version_code, version_name)
+    try:
+        patched = patch_manifest_bytes(in_path.read_bytes(), version_code, version_name)
+        problems = verify_attribute_order(patched)
+    except ValueError as exc:
+        print(f"patch_manifest.py: {exc}", file=sys.stderr)
+        return 1
+    if problems:
+        print("Attribute order verification failed:", file=sys.stderr)
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
     out_path.write_bytes(patched)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
