@@ -3,21 +3,25 @@ package com.bepinex.android.bpp;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.Application;
-import android.app.Dialog;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
+import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -34,59 +38,100 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Runs in the {@code :game} process as soon as that process starts, before Unity draws.
- * The grey screen during a first launch is Cpp2IL / interop generation, which writes nothing
- * for several minutes. This overlay says so, and the heartbeat records the stage anyway.
+ * Heartbeat and the first-run progress card for {@code :game}.
+ * The provider entry is only a backup: on the vivo that shipped preview.40 the provider's
+ * {@code android:process} was ignored and {@code onCreate} ran in the launcher, so the card
+ * never met the Unity window. {@link BppGameApplication} calls {@link #start} from whichever
+ * process is actually running, and {@code start} returns unless that process is {@code :game}.
  */
 public final class BppGameProcess extends ContentProvider {
 
     private static final long HEARTBEAT_MS = 3000L;
     private static final long STALL_MS = 20000L;
+    private static final long WAKE_LOCK_MS = 30L * 60L * 1000L;
     private static final int INTEROP_BASELINE_CAP = 20000;
 
     private static volatile boolean pluginsReady;
     private static volatile boolean started;
+    private static volatile boolean foregroundStarted;
+    private static volatile int overlayAttached;
     private static volatile String overlayText = "";
+    private static volatile String processName = "";
     private static volatile int interopBaseline;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final Runnable MAINTAIN = new Runnable() {
+        @Override
+        public void run() {
+            if (pluginsReady) return;
+            Activity activity = host.get();
+            if (activity != null && !activity.isFinishing() && !activity.isDestroyed()) {
+                attach(activity);
+            }
+            MAIN.postDelayed(this, 1000L);
+        }
+    };
     private static WeakReference<Activity> host = new WeakReference<Activity>(null);
-    private static Dialog overlayDialog;
+    private static Context appContext;
+    private static View overlayView;
+    private static WindowManager overlayWm;
+    private static boolean overlayInWindow;
     private static TextView bodyView;
+    private static PowerManager.WakeLock generationLock;
 
     @Override
     public boolean onCreate() {
         try {
-            final Context context = getContext();
-            if (context == null || !markStarted()) return true;
-            final long startedAt = System.currentTimeMillis();
-            final int pid = android.os.Process.myPid();
-            BppDiagnosticSessionLog.ensureCapture(context, "game", pid);
-            registerLifecycle(context);
-            Thread thread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    heartbeat(context, startedAt, pid);
-                }
-            }, "bpp-game-heartbeat");
-            thread.setDaemon(true);
-            thread.start();
-            MAIN.post(new Runnable() {
-                @Override
-                public void run() {
-                    refreshOverlay();
-                }
-            });
+            Context context = getContext();
+            if (context != null) start(context);
         } catch (Throwable ignored) {
         }
         return true;
     }
 
+    /** Starts the overlay and heartbeat only when the caller is the real {@code :game} process. */
+    public static void start(Context context) {
+        try {
+            if (context == null) return;
+            Context resolved = context.getApplicationContext();
+            if (resolved == null) resolved = context;
+            final Context app = resolved;
+            String process = Application.getProcessName();
+            if (process == null || !process.endsWith(":game")) {
+                noteHook(app, "game-hook-skipped", process);
+                return;
+            }
+            if (!markStarted()) return;
+            appContext = app;
+            processName = process;
+            noteHook(app, "game-hook-started", process);
+            final long startedAt = System.currentTimeMillis();
+            final int pid = android.os.Process.myPid();
+            BppDiagnosticSessionLog.ensureCapture(app, "game", pid);
+            registerLifecycle(app);
+            holdWakeLock(app);
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    heartbeat(app, startedAt, pid);
+                }
+            }, "bpp-game-heartbeat");
+            thread.setDaemon(true);
+            thread.start();
+            MAIN.removeCallbacks(MAINTAIN);
+            MAIN.post(MAINTAIN);
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static void markPluginsReady() {
         pluginsReady = true;
+        MAIN.removeCallbacks(MAINTAIN);
         MAIN.post(new Runnable() {
             @Override
             public void run() {
                 detach();
+                stopForegroundHold();
+                releaseWakeLock();
             }
         });
         Context context = currentContext();
@@ -109,7 +154,20 @@ public final class BppGameProcess extends ContentProvider {
 
     private static Context currentContext() {
         Activity activity = host.get();
-        return activity;
+        if (activity != null) return activity;
+        return appContext;
+    }
+
+    private static void noteHook(Context context, String event, String process) {
+        try {
+            String line = BppDiagnosticBundle.nowIso()
+                + " event=" + event
+                + " process=" + (process == null ? "" : process)
+                + " pid=" + android.os.Process.myPid();
+            File dir = BppDiagnosticSessionLog.diagnosticsDir(context);
+            BppDiagnosticBundle.appendCapped(new File(dir, "hook-process.txt"), line, 64 * 1024);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void registerLifecycle(Context context) {
@@ -140,41 +198,185 @@ public final class BppGameProcess extends ContentProvider {
         MAIN.post(new Runnable() {
             @Override
             public void run() {
-                if (pluginsReady || activity.isFinishing() || activity.isDestroyed()) return;
-                try {
-                    activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                } catch (Throwable ignored) {
-                }
                 attach(activity);
             }
         });
     }
 
     private static void attach(Activity activity) {
-        if (pluginsReady) return;
-        if (overlayDialog != null && overlayDialog.isShowing() && host.get() == activity) {
-            refreshOverlay();
-            return;
-        }
-        detach();
+        if (pluginsReady || activity == null || activity.isFinishing() || activity.isDestroyed()) return;
         try {
-            Dialog dialog = new Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar);
-            dialog.setCancelable(false);
-            dialog.setContentView(buildCard(activity));
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.parseColor("#CC121418")));
-                dialog.getWindow().setLayout(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                );
-                dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            View decor = activity.getWindow().getDecorView();
+            sinkSurfaces(decor);
+            if (overlayView != null && host.get() == activity && overlayAttached == 1 && overlayView.isAttachedToWindow()) {
+                refreshOverlay();
+                ensureForeground(activity);
+                return;
             }
-            dialog.show();
-            overlayDialog = dialog;
+            detachView();
+            FrameLayout root = buildOverlay(activity);
+            IBinder token = decor.getWindowToken();
+            boolean added = token != null && addPanel(activity, root, token);
+            if (!added) added = addToContent(activity, root);
+            if (!added) return;
+            overlayView = root;
             host = new WeakReference<Activity>(activity);
+            overlayAttached = 1;
             refreshOverlay();
+            ensureForeground(activity);
         } catch (Throwable ignored) {
         }
+    }
+
+    /** Unity's SurfaceView is composited in its own window and can cover a normal dialog. */
+    private static void sinkSurfaces(View view) {
+        if (view instanceof SurfaceView) {
+            SurfaceView surface = (SurfaceView) view;
+            try {
+                surface.setZOrderOnTop(false);
+            } catch (Throwable ignored) {
+            }
+            try {
+                surface.setZOrderMediaOverlay(false);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) sinkSurfaces(group.getChildAt(i));
+        }
+    }
+
+    private static boolean addPanel(Activity activity, View root, IBinder token) {
+        try {
+            WindowManager manager = activity.getWindowManager();
+            WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                    | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                    | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+                    | WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                PixelFormat.TRANSLUCENT
+            );
+            params.token = token;
+            params.gravity = Gravity.TOP | Gravity.START;
+            if (Build.VERSION.SDK_INT >= 30) {
+                params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            }
+            manager.addView(root, params);
+            overlayWm = manager;
+            overlayInWindow = true;
+            return true;
+        } catch (Throwable ignored) {
+            overlayWm = null;
+            overlayInWindow = false;
+            return false;
+        }
+    }
+
+    private static boolean addToContent(Activity activity, View root) {
+        try {
+            View content = activity.findViewById(android.R.id.content);
+            ViewGroup parent;
+            if (content instanceof ViewGroup) parent = (ViewGroup) content;
+            else if (activity.getWindow().getDecorView() instanceof ViewGroup) {
+                parent = (ViewGroup) activity.getWindow().getDecorView();
+            } else return false;
+            root.setElevation(10000f);
+            parent.addView(root, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ));
+            root.bringToFront();
+            overlayWm = null;
+            overlayInWindow = false;
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void ensureForeground(Activity activity) {
+        if (foregroundStarted || pluginsReady || activity == null) return;
+        if (!needsForegroundHold(activity)) return;
+        try {
+            Intent intent = new Intent(activity, BppGenerationForegroundService.class);
+            activity.startForegroundService(intent);
+            foregroundStarted = true;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean needsForegroundHold(Context context) {
+        try {
+            File interop = new File(gameRoot(context), "BepInEx/interop");
+            File[] files = interop.listFiles();
+            if (files == null) return true;
+            int dlls = 0;
+            for (int i = 0; i < files.length; i++) {
+                String name = files[i].getName().toLowerCase(java.util.Locale.ROOT);
+                if (name.endsWith(".dll")) dlls++;
+            }
+            return dlls <= 0;
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    private static void stopForegroundHold() {
+        if (!foregroundStarted) return;
+        Context context = currentContext();
+        if (context == null) return;
+        try {
+            Intent intent = new Intent(context, BppGenerationForegroundService.class);
+            intent.setAction(BppGenerationForegroundService.ACTION_STOP);
+            context.startService(intent);
+        } catch (Throwable ignored) {
+        }
+        foregroundStarted = false;
+    }
+
+    private static void holdWakeLock(Context context) {
+        try {
+            if (generationLock != null && generationLock.isHeld()) return;
+            PowerManager manager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (manager == null) return;
+            PowerManager.WakeLock lock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "bpp:generation");
+            lock.setReferenceCounted(false);
+            lock.acquire(WAKE_LOCK_MS);
+            generationLock = lock;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void releaseWakeLock() {
+        try {
+            PowerManager.WakeLock lock = generationLock;
+            generationLock = null;
+            if (lock != null && lock.isHeld()) lock.release();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static FrameLayout buildOverlay(Activity activity) {
+        FrameLayout root = new FrameLayout(activity);
+        root.setClickable(true);
+        root.setBackgroundColor(Color.parseColor("#F0121418"));
+        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER
+        );
+        int side = dp(activity, 28);
+        cardParams.leftMargin = side;
+        cardParams.rightMargin = side;
+        root.addView(buildCard(activity), cardParams);
+        return root;
     }
 
     private static LinearLayout buildCard(Activity activity) {
@@ -222,13 +424,23 @@ public final class BppGameProcess extends ContentProvider {
     }
 
     private static void detach() {
-        Dialog dialog = overlayDialog;
-        overlayDialog = null;
+        detachView();
         host = new WeakReference<Activity>(null);
+    }
+
+    private static void detachView() {
+        View view = overlayView;
+        WindowManager manager = overlayWm;
+        boolean inWindow = overlayInWindow;
+        overlayView = null;
+        overlayWm = null;
+        overlayInWindow = false;
+        overlayAttached = 0;
         bodyView = null;
-        if (dialog == null) return;
+        if (view == null) return;
         try {
-            dialog.dismiss();
+            if (inWindow && manager != null) manager.removeViewImmediate(view);
+            else if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
         } catch (Throwable ignored) {
         }
     }
@@ -304,6 +516,9 @@ public final class BppGameProcess extends ContentProvider {
                     + " importance=" + importance
                     + " importanceName=" + BppDiagnosticBundle.importanceName(importance)
                     + " pid=" + pid
+                    + " process=" + processName
+                    + " overlay=" + overlayAttached
+                    + " foreground=" + (foregroundStarted ? 1 : 0)
                     + " percent=" + percent;
                 publish(context, gameRoot, probe, stage, label, elapsed, percent, rss, importance, line);
                 patchConfigs(gameRoot);
@@ -388,6 +603,10 @@ public final class BppGameProcess extends ContentProvider {
             state.append("unityLibFiles=").append(probe.unityLibFiles).append('\n');
             state.append("importance=").append(importance).append('\n');
             state.append("firstRun=").append(firstRun).append('\n');
+            state.append("process=").append(processName).append('\n');
+            state.append("pid=").append(android.os.Process.myPid()).append('\n');
+            state.append("overlay=").append(overlayAttached).append('\n');
+            state.append("foreground=").append(foregroundStarted ? 1 : 0).append('\n');
             writeAtomically(new File(dir, "generation-state.txt"), state.toString());
             File external = context.getExternalFilesDir(null);
             if (external != null) {

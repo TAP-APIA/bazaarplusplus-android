@@ -12,6 +12,10 @@ ORIG_MAIN_ACTIVITY_NAME = "com.bepinex.android.MainActivity"
 BPP_APP_LABEL = "BPP Android"
 GAME_PROCESS_PROVIDER = "com.bepinex.android.bpp.BppGameProcess"
 GAME_PROCESS_AUTHORITY = "com.bepinex.android.bpp.game-process"
+GAME_APPLICATION = "com.bepinex.android.bpp.BppGameApplication"
+GAME_SERVICE = "com.bepinex.android.bpp.BppGenerationForegroundService"
+FGS_PROPERTY = "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+FGS_SUBTYPE = "keep_game_foreground_during_mod_generation"
 UNITY_WINDOW_METADATA = ("unity.launch-fullscreen", "unity.render-outside-safearea")
 
 
@@ -328,7 +332,7 @@ def patch_manifest_bytes(
     body = b"".join(out_chunks)
     total_size = 8 + len(body)
     header = struct.pack("<II", 0x00080003, total_size)
-    return ensure_game_process_provider(patch_unity_window_metadata(header + body))
+    return _install_game_process_hooks(header + body)
 
 
 def _update_bpp_manifest_version(axml: bytes, version_code: int | None, version_name: str | None) -> bytes:
@@ -365,9 +369,97 @@ def _update_bpp_manifest_version(axml: bytes, version_code: int | None, version_
     if bpp_activities != 1 or not version_updated:
         raise ValueError("Expected exactly one BppLauncherActivity and a manifest")
     body = b"".join(chunks)
-    return ensure_game_process_provider(
-        patch_unity_window_metadata(struct.pack("<HHI", 3, 8, len(body) + 8) + body)
+    return _install_game_process_hooks(struct.pack("<HHI", 3, 8, len(body) + 8) + body)
+
+
+def _install_game_process_hooks(axml: bytes) -> bytes:
+    """Hooks that must run inside :game while Cpp2IL generates on the grey screen."""
+    return ensure_generation_service(
+        ensure_game_application(ensure_game_process_provider(patch_unity_window_metadata(axml)))
     )
+
+
+def _with_extra_strings(axml: bytes, extra: list[str]) -> tuple[bytes, list[str]]:
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    existing = _parse_string_pool(axml[8 : 8 + pool_size])
+    missing = [value for value in extra if value not in existing]
+    if not missing:
+        return axml, existing
+    pool, strings = _rebuild_string_pool_with_appended(axml[8 : 8 + pool_size], missing)
+    body = pool + axml[8 + pool_size :]
+    return struct.pack("<HHI", 3, 8, len(body) + 8) + body, strings
+
+
+def _append_element_attr(chunk: bytes, strings: list[str], attr_name: str, raw: int, typ: int, data: int) -> bytes:
+    kind, header_size, size = struct.unpack_from("<HHI", chunk, 0)
+    if kind != RES_XML_START_ELEMENT_TYPE:
+        raise ValueError("Cannot append an attribute to a non-element chunk")
+    _line, _comment, _ns, _name, attr_start, attr_size, attr_count = struct.unpack_from("<IIIIHHH", chunk, 8)
+    if attr_size != 20:
+        raise ValueError(f"Unexpected attribute size {attr_size}")
+    pos = header_size + attr_start + attr_count * attr_size
+    if pos > len(chunk):
+        raise ValueError("Attribute list extends past its element chunk")
+    attr = struct.pack(
+        "<IIIHBBI",
+        strings.index("http://schemas.android.com/apk/res/android"),
+        strings.index(attr_name),
+        raw,
+        8,
+        0,
+        typ,
+        data,
+    )
+    updated = bytearray(chunk[:pos] + attr + chunk[pos:])
+    struct.pack_into("<I", updated, 4, size + len(attr))
+    struct.pack_into("<H", updated, 28, attr_count + 1)
+    return bytes(updated)
+
+
+def _has_component(axml: bytes, element_name: str, class_name: str) -> bool:
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    offset = 8 + pool_size
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            break
+        if kind == RES_XML_START_ELEMENT_TYPE:
+            element, attrs = _get_start_element_info(axml[offset : offset + size], strings)
+            if element == element_name and attrs.get("name") == class_name:
+                return True
+        offset += size
+    return False
+
+
+def ensure_game_application(axml: bytes) -> bytes:
+    """Run launcher code in every process, including :game, without a custom provider process."""
+    axml, strings = _with_extra_strings(axml, [GAME_APPLICATION])
+    if _has_component(axml, "application", GAME_APPLICATION):
+        return axml
+    class_index = strings.index(GAME_APPLICATION)
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    parts: list[bytes] = []
+    offset = 8 + pool_size
+    found = False
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            raise ValueError("Corrupt AXML chunk while setting the game application")
+        chunk = axml[offset : offset + size]
+        if not found and kind == RES_XML_START_ELEMENT_TYPE:
+            element, attrs = _get_start_element_info(chunk, strings)
+            if element == "application":
+                if attrs.get("name"):
+                    return axml
+                chunk = _append_element_attr(chunk, strings, "name", class_index, TYPE_STRING, class_index)
+                found = True
+        parts.append(chunk)
+        offset += size
+    if not found:
+        raise ValueError("application element not found while setting the game application")
+    body = axml[8 : 8 + pool_size] + b"".join(parts)
+    return struct.pack("<HHI", 3, 8, len(body) + 8) + body
 
 
 def _has_provider(axml: bytes, class_name: str) -> bool:
@@ -470,6 +562,107 @@ def ensure_game_process_provider(axml: bytes) -> bytes:
     if not inserted:
         raise ValueError("application element not found while inserting the game provider")
     body = b"".join(chunks)
+    return struct.pack("<HHI", 3, 8, len(body) + 8) + body
+
+
+def _android_attr(strings: list[str], name: str, raw: int, typ: int, data: int) -> bytes:
+    return struct.pack(
+        "<IIIHBBI",
+        strings.index("http://schemas.android.com/apk/res/android"),
+        strings.index(name),
+        raw,
+        8,
+        0,
+        typ,
+        data,
+    )
+
+
+def _xml_start(name_index: int, attrs: bytes, count: int) -> bytes:
+    return struct.pack(
+        "<HHI4I6H",
+        RES_XML_START_ELEMENT_TYPE,
+        16,
+        36 + len(attrs),
+        0,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        name_index,
+        20,
+        20,
+        count,
+        0,
+        0,
+        0,
+    ) + attrs
+
+
+def _xml_end(name_index: int) -> bytes:
+    return struct.pack(
+        "<HHI4I",
+        RES_XML_END_ELEMENT_TYPE,
+        16,
+        24,
+        0,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        name_index,
+    )
+
+
+def _generation_service_chunks(strings: list[str]) -> bytes:
+    for required in ("service", "property", "name", "exported", "process", "foregroundServiceType", "value", ":game"):
+        if required not in strings:
+            raise ValueError(f"Manifest is missing the {required} string needed for the generation service")
+    service_index = strings.index("service")
+    property_index = strings.index("property")
+    class_index = strings.index(GAME_SERVICE)
+    game_index = strings.index(":game")
+    property_name = strings.index(FGS_PROPERTY)
+    property_value = strings.index(FGS_SUBTYPE)
+    service_attrs = b"".join([
+        _android_attr(strings, "name", class_index, TYPE_STRING, class_index),
+        _android_attr(strings, "exported", 0xFFFFFFFF, 0x12, 0),
+        _android_attr(strings, "process", game_index, TYPE_STRING, game_index),
+        _android_attr(strings, "foregroundServiceType", 0xFFFFFFFF, 0x11, 0x40000000),
+    ])
+    property_attrs = b"".join([
+        _android_attr(strings, "name", property_name, TYPE_STRING, property_name),
+        _android_attr(strings, "value", property_value, TYPE_STRING, property_value),
+    ])
+    return b"".join([
+        _xml_start(service_index, service_attrs, 4),
+        _xml_start(property_index, property_attrs, 2),
+        _xml_end(property_index),
+        _xml_end(service_index),
+    ])
+
+
+def ensure_generation_service(axml: bytes) -> bytes:
+    """Keep :game at foreground-service importance while the first-run generator is alive."""
+    if _has_component(axml, "service", GAME_SERVICE):
+        return axml
+    axml, strings = _with_extra_strings(axml, [GAME_SERVICE, FGS_PROPERTY, FGS_SUBTYPE, ":game"])
+    blob = _generation_service_chunks(strings)
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    parts: list[bytes] = []
+    offset = 8 + pool_size
+    inserted = False
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            raise ValueError("Corrupt AXML chunk while inserting the generation service")
+        chunk = axml[offset : offset + size]
+        parts.append(chunk)
+        if not inserted and kind == RES_XML_START_ELEMENT_TYPE:
+            element, _attrs = _get_start_element_info(chunk, strings)
+            if element == "application":
+                parts.append(blob)
+                inserted = True
+        offset += size
+    if not inserted:
+        raise ValueError("application element not found while inserting the generation service")
+    body = axml[8 : 8 + pool_size] + b"".join(parts)
     return struct.pack("<HHI", 3, 8, len(body) + 8) + body
 
 

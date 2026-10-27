@@ -27,8 +27,9 @@
 - **重新校验 / 修复模组**：重新校验全部内置文件；损坏或缺失时自动恢复。游戏进程运行时
   会先停止 `:game` 进程再修复。
 - **打开原版高级启动器**：保留原 BepInEx Launcher 的模组管理、日志等高级功能。
-- **首次启动**：游戏画面会灰几分钟，这是在生成模组文件，不是卡死。游戏画面上会显示进度
-  （阶段、已用时、interop / Unity 基础库文件数）。请保持游戏在前台，不要切回启动器。
+- **首次启动**：游戏画面会灰几分钟，这是在生成模组文件，不是卡死。进度直接画在游戏窗口上
+  （阶段、已用时、interop / Unity 基础库文件数），不是另一个对话框。通知会让游戏进程保持前台，
+  请不要划掉通知，也不要切回启动器。
 - **导出诊断日志**：打一个 zip，保存到系统「下载」，并打开系统分享面板。包内有设备与屏幕信息、
   启动器和游戏包版本、签名证书 SHA-256、libil2cpp 大小/哈希/ELF 对齐、内置模组部署状态、
   BepInEx / Unity / BPP 日志、logcat、ApplicationExitInfo（含 `:game`）和启动器配置。
@@ -130,7 +131,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launc
 - `-ModpackZip` 可指定现成 ZIP，跳过重新打包。
 - `-KeyStore` / `-KeyAlias` 可改用正式签名；默认使用
   `%USERPROFILE%\.android\debug.keystore` 的 `androiddebugkey`。
-- `-VersionCode` 每次发布必须递增；默认 `40`，版本名 `6.0.0-preview.40`（已安装过的 preview.39 是 `39`）。
+- `-VersionCode` 每次发布必须递增；默认 `41`，版本名 `6.0.0-preview.41`（已安装过的 preview.40 是 `40`）。
   默认输出 `dist/BepInExLauncher-bpp-android.apk`。
 - `-UnsignedOnly` 只生成对齐后的未签名 APK。
 

@@ -5,6 +5,9 @@ from pathlib import Path
 from patch_manifest import (
     BPP_ACTIVITY_NAME,
     BPP_APP_LABEL,
+    FGS_SUBTYPE,
+    GAME_APPLICATION,
+    GAME_SERVICE,
     ORIG_MAIN_ACTIVITY_NAME,
     RES_XML_END_ELEMENT_TYPE,
     RES_XML_START_ELEMENT_TYPE,
@@ -88,6 +91,51 @@ def _collect_metadata(axml: bytes) -> dict[str, str]:
     return metadata
 
 
+def _application_name(axml: bytes) -> str:
+    _, _, pool_size = struct.unpack_from("<HHI", axml, 8)
+    strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    off = 8 + pool_size
+    while off < len(axml):
+        ct, _ch, cs = struct.unpack_from("<HHI", axml, off)
+        chunk = axml[off : off + cs]
+        if ct == RES_XML_START_ELEMENT_TYPE:
+            el, attrs = _get_start_element_info(chunk, strings)
+            if el == "application":
+                return attrs.get("name", "")
+        off += cs
+    return ""
+
+
+def _collect_services(axml: bytes) -> list[dict[str, str]]:
+    _, _, pool_size = struct.unpack_from("<HHI", axml, 8)
+    strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    off = 8 + pool_size
+    services: list[dict[str, str]] = []
+    depth = 0
+    current: dict[str, str] | None = None
+    service_depth = -1
+    while off < len(axml):
+        ct, _ch, cs = struct.unpack_from("<HHI", axml, off)
+        chunk = axml[off : off + cs]
+        if ct == RES_XML_START_ELEMENT_TYPE:
+            el, attrs = _get_start_element_info(chunk, strings)
+            if el == "service":
+                current = dict(attrs)
+                services.append(current)
+                service_depth = depth
+            elif current is not None and el == "property" and depth == service_depth + 1:
+                if attrs.get("name") == "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE":
+                    current["subtype"] = attrs.get("value", "")
+            depth += 1
+        elif ct == RES_XML_END_ELEMENT_TYPE:
+            depth -= 1
+            if current is not None and depth == service_depth:
+                current = None
+                service_depth = -1
+        off += cs
+    return services
+
+
 def _collect_providers(axml: bytes) -> dict[str, dict[str, str]]:
     _, _, pool_size = struct.unpack_from("<HHI", axml, 8)
     strings = _parse_string_pool(axml[8 : 8 + pool_size])
@@ -161,6 +209,15 @@ def main() -> int:
     assert game.get("authorities") == "com.bepinex.android.bpp.game-process", game
     again = patch_manifest_bytes(stable, version_code=40, version_name="6.0.0-preview.40", allow_repack=True)
     assert list(_collect_providers(again)).count("com.bepinex.android.bpp.BppGameProcess") == 1
+    assert _application_name(stable) == GAME_APPLICATION, _application_name(stable)
+    assert _application_name(again) == GAME_APPLICATION
+    services = [item for item in _collect_services(stable) if item.get("name") == GAME_SERVICE]
+    assert len(services) == 1, services
+    assert services[0].get("process") == ":game", services[0]
+    assert services[0].get("exported") == "0x0", services[0]
+    assert services[0].get("foregroundServiceType") == "0x40000000", services[0]
+    assert services[0].get("subtype") == FGS_SUBTYPE, services[0]
+    assert len([item for item in _collect_services(again) if item.get("name") == GAME_SERVICE]) == 1
     assert _collect_activities(stable) == _collect_activities(patched)
     assert _collect_metadata(stable) == _collect_metadata(patched)
 

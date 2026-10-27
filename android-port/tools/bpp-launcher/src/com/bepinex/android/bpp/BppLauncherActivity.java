@@ -926,10 +926,10 @@ public final class BppLauncherActivity extends Activity {
     private String launchWarningMessage() {
         if (killedDuringGeneration()) {
             return "上次生成模组文件时游戏被系统杀掉了（内存不足）。当时游戏不在前台，系统会优先回收它。"
-                + "请重新启动后留在灰色画面，不要切回启动器或桌面，直到进入游戏。灰色画面不是卡死。";
+                + "请重新启动后留在灰色画面，上面会显示「模组准备中」。不要切回启动器或桌面，也不要划掉通知，直到进入游戏。";
         }
         return BppDiagnosticBundle.FIRST_RUN_OVERLAY_TEXT
-            + "。进入游戏后画面会是灰色，这是在生成模组文件，不是卡死。请一直留在游戏里。";
+            + "。进入游戏后灰色画面上会显示「模组准备中」。请一直留在游戏里，不要划掉通知。";
     }
 
     private void refreshGenerationHint() {
@@ -938,13 +938,13 @@ public final class BppLauncherActivity extends Activity {
             if (killedDuringGeneration()) {
                 tvGenerationHint.setVisibility(View.VISIBLE);
                 tvGenerationHint.setText("上次生成模组文件时，游戏因为切到后台被系统杀掉了（内存不足）。"
-                    + "请再启动一次，并停留在灰色画面直到进入游戏。");
+                    + "请再启动一次，留在灰色画面上的「模组准备中」直到进入游戏，不要划掉通知。");
                 return;
             }
             if (interopDllCount() <= 0) {
                 tvGenerationHint.setVisibility(View.VISIBLE);
                 tvGenerationHint.setText(BppDiagnosticBundle.FIRST_RUN_OVERLAY_TEXT
-                    + "。灰色画面是正常的，请不要切走。");
+                    + "。灰色画面上会显示进度，请不要切走，也不要划掉通知。");
                 return;
             }
             tvGenerationHint.setVisibility(View.GONE);
