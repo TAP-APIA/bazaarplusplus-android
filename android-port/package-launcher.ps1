@@ -8,7 +8,7 @@ param(
     [string]$SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
     [string]$KeyStore = '',
     [string]$KeyAlias = 'androiddebugkey',
-    [int]$VersionCode = 11,
+    [int]$VersionCode = 42,
     [string]$AndroidSdkRoot = $env:ANDROID_SDK_ROOT,
     [switch]$UnsignedOnly
 )
@@ -62,6 +62,7 @@ $productVersion = if (Test-Path -LiteralPath $versionFile) {
 }
 # Monotonic Android versioning for the self-deploying launcher. Bump this for every published APK;
 # install -r refuses a lower versionCode and users must not uninstall (that wipes local history).
+# android-v6.0.0-preview.41 shipped versionCode 41, so the next package is 42 / 6.0.0-preview.42.
 $versionCode = $VersionCode
 $versionName = "$productVersion-preview.$versionCode"
 
@@ -98,6 +99,13 @@ try {
     & $java -cp $testClasses com.bepinex.android.bpp.BppBundledModpackInstallerTests
     if ($LASTEXITCODE -ne 0) { throw 'BppBundledModpackInstaller unit tests failed' }
 
+    & $javac -encoding UTF-8 --release 17 -d $testClasses `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticBundle.java') `
+        (Join-Path $launcherToolsDir 'test/com/bepinex/android/bpp/BppDiagnosticBundleTests.java')
+    if ($LASTEXITCODE -ne 0) { throw 'BppDiagnosticBundle test compilation failed' }
+    & $java -cp $testClasses com.bepinex.android.bpp.BppDiagnosticBundleTests
+    if ($LASTEXITCODE -ne 0) { throw 'BppDiagnosticBundle unit tests failed' }
+
     & python (Join-Path $launcherToolsDir 'test_patch_manifest.py') ([IO.Path]::GetFullPath($SourceApk))
     if ($LASTEXITCODE -ne 0) { throw 'AndroidManifest patcher tests failed' }
 
@@ -107,16 +115,53 @@ try {
     & python (Join-Path $launcherToolsDir 'test_launcher_update.py')
     if ($LASTEXITCODE -ne 0) { throw 'Launcher update checker tests failed' }
 
+    # 1.5 Bake the git commit and version into a generated BppBuildInfo.java, then compile that
+    # generated copy instead of the source placeholder.
+    $commit = 'unknown'
+    try {
+        $commitOutput = & git -C $PSScriptRoot rev-parse --short=12 HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($commitOutput)) {
+            $commit = $commitOutput.Trim()
+            $dirtyOutput = & git -C $PSScriptRoot status --porcelain 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($dirtyOutput)) {
+                $commit = "$commit-dirty"
+            }
+        }
+    } catch {
+        $commit = 'unknown'
+    }
+    if ([string]::IsNullOrWhiteSpace($commit)) { $commit = 'unknown' }
+
+    $generatedBuildInfoDir = Join-Path $workRoot 'generated-bpp-buildinfo'
+    New-Item -ItemType Directory -Force -Path $generatedBuildInfoDir | Out-Null
+    $sourceBuildInfo = Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBuildInfo.java'
+    if (-not (Test-Path -LiteralPath $sourceBuildInfo -PathType Leaf)) {
+        throw "BppBuildInfo.java source not found: $sourceBuildInfo"
+    }
+    $generatedBuildInfo = Join-Path $generatedBuildInfoDir 'BppBuildInfo.java'
+    $buildInfoText = [System.IO.File]::ReadAllText($sourceBuildInfo)
+    $buildInfoText = $buildInfoText.Replace('COMMIT = "dev"', ('COMMIT = "' + $commit + '"'))
+    $buildInfoText = $buildInfoText.Replace('VERSION_NAME = "dev"', ('VERSION_NAME = "' + $versionName + '"'))
+    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    [System.IO.File]::WriteAllText($generatedBuildInfo, $buildInfoText, $utf8NoBom)
+
     # 2. Compile BppBundledModpackInstaller + BppLauncherActivity into classes3.dex
     $appClasses = Join-Path $workRoot 'app-classes'
     $dexOut = Join-Path $workRoot 'dex'
     New-Item -ItemType Directory -Force -Path $appClasses, $dexOut | Out-Null
     & $javac -encoding UTF-8 --release 11 -cp $platformJar -d $appClasses `
+        $generatedBuildInfo `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBundledModpackInstaller.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherUpdateChecker.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBackBridge.java') `
-        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java')
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticBundle.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticExporter.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticSessionLog.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameProcess.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameApplication.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGenerationForegroundService.java')
     if ($LASTEXITCODE -ne 0) { throw 'BppLauncherActivity compilation failed' }
 
     $compiledClassFiles = @(Get-ChildItem -LiteralPath $appClasses -Recurse -Filter *.class | Select-Object -ExpandProperty FullName)
@@ -334,3 +379,4 @@ print(f"Assembled unsigned APK: {unsigned_apk_out} (bundle_id={bundle_id[:12]}, 
 } finally {
     Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+
