@@ -44,6 +44,7 @@ public final class BppGameWindow {
                     if (generation != token) return;
                     try {
                         if (!isGameTarget(activity)) return;
+                        ensureDiagnosticCapture(activity);
                         Window window = activity.getWindow();
                         if (window == null) return;
                         View decor = window.getDecorView();
@@ -83,6 +84,20 @@ public final class BppGameWindow {
         final WindowBinding previous = binding;
         binding = null;
         if (previous != null) MAIN.post(previous::release);
+    }
+
+    private static boolean diagnosticCaptureStarted;
+
+    /** Loads the exporter only when this process is the real game. Tests do not ship that class. */
+    private static void ensureDiagnosticCapture(Activity activity) {
+        if (diagnosticCaptureStarted || activity == null) return;
+        diagnosticCaptureStarted = true;
+        try {
+            Class<?> logClass = Class.forName("com.bepinex.android.bpp.BppDiagnosticSessionLog");
+            Class<?> contextClass = Class.forName("android.content.Context");
+            logClass.getMethod("ensureCapture", contextClass, String.class).invoke(null, activity, "game");
+        } catch (Throwable ignored) {
+        }
     }
 
     private static final class WindowBinding implements ViewTreeObserver.OnWindowFocusChangeListener {

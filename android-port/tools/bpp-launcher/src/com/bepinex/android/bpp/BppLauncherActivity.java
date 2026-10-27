@@ -3,6 +3,8 @@ package com.bepinex.android.bpp;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -66,6 +68,7 @@ public final class BppLauncherActivity extends Activity {
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService updateWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService diagnosticWorker = Executors.newSingleThreadExecutor();
 
     private TextView tvStatusBadge;
     private TextView tvStatusHeadline;
@@ -80,6 +83,9 @@ public final class BppLauncherActivity extends Activity {
     private TextView tvUpdateInfo;
     private Button btnCheckUpdate;
     private Button btnDownloadUpdate;
+    private Button btnExportDiagnostics;
+    private TextView tvExportInfo;
+    private volatile boolean exportingDiagnostics;
     private boolean checkingUpdate;
     private boolean updateChecked;
     private boolean resumed;
@@ -107,6 +113,10 @@ public final class BppLauncherActivity extends Activity {
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
         initLauncherCore();
+        try {
+            BppDiagnosticSessionLog.ensureCapture(this, "launcher");
+        } catch (Throwable ignored) {
+        }
         setContentView(buildContentView());
     }
 
@@ -137,6 +147,7 @@ public final class BppLauncherActivity extends Activity {
         super.onDestroy();
         worker.shutdownNow();
         updateWorker.shutdownNow();
+        diagnosticWorker.shutdownNow();
     }
 
     private View buildContentView() {
@@ -333,6 +344,51 @@ public final class BppLauncherActivity extends Activity {
 
         root.addView(secondaryRow, rowLp);
 
+        btnExportDiagnostics = createActionButton(
+            "导出诊断日志",
+            "bpp_btn_export_diagnostics",
+            COLOR_BUTTON_SECONDARY_BG,
+            COLOR_GOLD,
+            COLOR_GOLD,
+            15f,
+            true
+        );
+        btnExportDiagnostics.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                exportDiagnostics();
+            }
+        });
+        LinearLayout.LayoutParams exportLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(48)
+        );
+        exportLp.topMargin = dp(10);
+        root.addView(btnExportDiagnostics, exportLp);
+
+        TextView exportHint = new TextView(this);
+        exportHint.setText("灰屏或闪退后回到本页再点。会保存到「下载」并打开分享，包含设备信息与启动日志，不含对局数据库和签名私钥。");
+        exportHint.setTextColor(COLOR_TEXT_SECONDARY);
+        exportHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        LinearLayout.LayoutParams exportHintLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        exportHintLp.topMargin = dp(6);
+        root.addView(exportHint, exportHintLp);
+
+        tvExportInfo = new TextView(this);
+        tvExportInfo.setContentDescription("bpp_export_path");
+        tvExportInfo.setTextColor(COLOR_GOLD);
+        tvExportInfo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        tvExportInfo.setVisibility(View.GONE);
+        LinearLayout.LayoutParams exportInfoLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        exportInfoLp.topMargin = dp(4);
+        root.addView(tvExportInfo, exportInfoLp);
+
         LinearLayout infoCard = createCard(COLOR_CARD_SUBTLE, COLOR_GOLD_BORDER, dp(14));
         LinearLayout.LayoutParams infoCardLp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -528,6 +584,7 @@ public final class BppLauncherActivity extends Activity {
             );
         } catch (final Exception ex) {
             logError("Failed to read bundled manifest", ex);
+            notePrepare("manifest-error", String.valueOf(ex.getMessage()));
             updateUiState(
                 "清单错误",
                 COLOR_STATUS_ERR,
@@ -569,6 +626,7 @@ public final class BppLauncherActivity extends Activity {
                     resolvedManifest,
                     gameRootDir
                 );
+                notePrepare("game-running", "pid=" + gamePid);
                 return;
             }
         }
@@ -636,6 +694,7 @@ public final class BppLauncherActivity extends Activity {
                     resolvedManifest,
                     gameRootDir
                 );
+                notePrepare("mod-ready-no-game", pkg);
                 return;
             }
 
@@ -650,11 +709,13 @@ public final class BppLauncherActivity extends Activity {
                 gameRootDir
             );
 
+            notePrepare("ready", finalReport.detail);
             if (launchWhenReady) {
                 launchBazaarWithBpp(pkg);
             }
         } catch (final Exception ex) {
             logError("BPP bundled modpack preparation failed", ex);
+            notePrepare("failed", String.valueOf(ex.getMessage()));
             updateUiState(
                 "需要修复",
                 COLOR_STATUS_ERR,
@@ -695,6 +756,19 @@ public final class BppLauncherActivity extends Activity {
             );
             recordActiveModpackSelection(packageName, BppBundledModpackInstaller.MODPACK_NAME);
             markCrashDiagnosticsLaunch(packageName);
+            BppDiagnosticSessionLog.noteLaunch(
+                this,
+                BppDiagnosticBundle.nowIso()
+                    + " event=launch"
+                    + " target=" + packageName
+                    + " pid=" + Process.myPid()
+                    + " gamePid=" + findRunningGameProcessPid()
+                    + " ogLibUnity=" + useOriginalLibUnity
+                    + " blockUnityKill=" + blockUnityKill
+                    + " screenDim=" + screenDim
+                    + " floatingLog=" + floatingLog
+                    + " modpack=" + BppBundledModpackInstaller.MODPACK_NAME
+            );
 
             final Class<?> bootstrapClass = Class.forName("com.bepinex.android.BootstrapActivity");
             runOnUiThread(new Runnable() {
@@ -1030,6 +1104,107 @@ public final class BppLauncherActivity extends Activity {
         Method runBlocking = Class.forName("kotlinx.coroutines.BuildersKt")
             .getMethod("runBlocking$default", ctxClass, fn2Class, int.class, Object.class);
         return runBlocking.invoke(null, null, block, 1, null);
+    }
+
+    private void exportDiagnostics() {
+        if (exportingDiagnostics || isFinishing() || isDestroyed()) return;
+        exportingDiagnostics = true;
+        if (btnExportDiagnostics != null) {
+            btnExportDiagnostics.setEnabled(false);
+            btnExportDiagnostics.setAlpha(0.55f);
+            btnExportDiagnostics.setText("正在导出诊断日志…");
+        }
+        final String displaySnapshot = BppDiagnosticExporter.captureDisplaySnapshot(this);
+        final File gameRoot = resolveGameRootDir(BppBundledModpackInstaller.TARGET_PACKAGE);
+        final File internalWork = new File(getFilesDir(), "bpp-bundled-installer");
+        diagnosticWorker.execute(new Runnable() {
+            @Override
+            public void run() {
+                final BppDiagnosticExporter.Saved saved = BppDiagnosticExporter.exportAndSave(
+                    BppLauncherActivity.this, gameRoot, internalWork, displaySnapshot);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        exportingDiagnostics = false;
+                        if (btnExportDiagnostics != null) {
+                            btnExportDiagnostics.setEnabled(true);
+                            btnExportDiagnostics.setAlpha(1f);
+                            btnExportDiagnostics.setText("导出诊断日志");
+                        }
+                        if (isDestroyed() || isFinishing()) return;
+                        showExportResult(saved);
+                    }
+                });
+            }
+        });
+    }
+
+    private void showExportResult(BppDiagnosticExporter.Saved saved) {
+        if (saved == null || !saved.ok) {
+            String error = saved == null ? "未知错误" : saved.error;
+            new AlertDialog.Builder(this)
+                .setTitle("导出失败")
+                .setMessage("诊断日志没有生成，启动器仍可继续使用。\n" + error)
+                .setPositiveButton("关闭", null)
+                .show();
+            return;
+        }
+        if (tvExportInfo != null) {
+            tvExportInfo.setVisibility(View.VISIBLE);
+            tvExportInfo.setText("最近导出：" + saved.displayPath);
+        }
+        try {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("BPP diagnostics", saved.displayPath));
+            }
+        } catch (Throwable ignored) {
+        }
+        StringBuilder message = new StringBuilder();
+        message.append("已保存到：\n").append(saved.displayPath)
+            .append("\n大小：").append(saved.sizeBytes).append(" 字节")
+            .append("\nSHA-256：").append(saved.sha256)
+            .append("\n\n路径已复制。可在系统「下载」里找到该 zip。分享前请确认可以接受包内的设备标识与日志。");
+        if (saved.warning != null && saved.warning.length() > 0) {
+            message.append("\n\n").append(saved.warning);
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+            .setTitle("诊断日志已保存")
+            .setMessage(message.toString())
+            .setNegativeButton("关闭", null);
+        if (saved.shareUri != null) {
+            builder.setPositiveButton("分享", (dialog, which) -> shareDiagnostic(saved.shareUri));
+        }
+        builder.show();
+        if (saved.shareUri != null) shareDiagnostic(saved.shareUri);
+    }
+
+    private void shareDiagnostic(Uri uri) {
+        if (uri == null) return;
+        try {
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("application/zip");
+            share.putExtra(Intent.EXTRA_STREAM, uri);
+            share.putExtra(Intent.EXTRA_SUBJECT, "BPP Android 诊断日志");
+            share.putExtra(Intent.EXTRA_TEXT, "BazaarPlusPlus Android 诊断包");
+            share.setClipData(ClipData.newRawUri("BPP diagnostics", uri));
+            share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent chooser = Intent.createChooser(share, "分享诊断日志");
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(chooser);
+        } catch (Throwable error) {
+            Toast.makeText(this, "无法打开分享面板，文件仍已保存", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void notePrepare(String outcome, String detail) {
+        String text = detail == null ? "" : detail.replace('\n', ' ').replace('\r', ' ');
+        if (text.length() > 500) text = text.substring(0, 500);
+        BppDiagnosticSessionLog.note(
+            this,
+            "prepare-results.log",
+            BppDiagnosticBundle.nowIso() + " outcome=" + outcome + " detail=" + text
+        );
     }
 
     private void logError(String message, Throwable error) {
