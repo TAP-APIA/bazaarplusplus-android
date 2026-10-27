@@ -7,7 +7,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -25,6 +27,7 @@ public final class BppDiagnosticSessionLog {
     private static final int NOTE_CAP_BYTES = 256 * 1024;
     private static final Object GATE = new Object();
     private static final Set<String> STARTED = new HashSet<String>();
+    private static final Map<String, String> MARKERS = new HashMap<String, String>();
     private static final ScheduledExecutorService SNAPSHOTS = Executors.newSingleThreadScheduledExecutor(
         new ThreadFactory() {
             @Override
@@ -35,19 +38,35 @@ public final class BppDiagnosticSessionLog {
             }
         }
     );
+    private static final ScheduledExecutorService ROLLING = Executors.newSingleThreadScheduledExecutor(
+        new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "bpp-diag-rolling");
+                thread.setDaemon(true);
+                return thread;
+            }
+        }
+    );
 
     private BppDiagnosticSessionLog() {}
 
     public static void ensureCapture(Context context, String role) {
+        ensureCapture(context, role, 0);
+    }
+
+    /** {@code pid > 0} limits the rolling dump to that process ({@code logcat --pid}). */
+    public static void ensureCapture(Context context, String role, int pid) {
         if (context == null || !isRole(role)) return;
         final Context app = application(context);
+        final int filter = Math.max(0, pid);
         synchronized (GATE) {
             if (!STARTED.add(role)) return;
         }
         Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
-                startRolling(app, role);
+                startRolling(app, role, filter);
             }
         }, "bpp-diag-" + role);
         thread.setDaemon(true);
@@ -111,8 +130,12 @@ public final class BppDiagnosticSessionLog {
     }
 
     static String dumpLogcat() {
+        return dumpLogcat(0);
+    }
+
+    static String dumpLogcat(int pid) {
         String all = BppDiagnosticBundle.captureProcessText(
-            BppDiagnosticBundle.dumpLogcatCommand("all"), 20000L, 3 * 1024 * 1024);
+            BppDiagnosticBundle.dumpLogcatCommand("all", pid), 20000L, 3 * 1024 * 1024);
         if (!isFailedDump(all)) return all;
         StringBuilder sb = new StringBuilder();
         sb.append(all);
@@ -121,7 +144,7 @@ public final class BppDiagnosticSessionLog {
             String buffer = BppDiagnosticBundle.LOGCAT_BUFFERS[i];
             sb.append("===== buffer ").append(buffer).append(" =====\n");
             sb.append(BppDiagnosticBundle.captureProcessText(
-                BppDiagnosticBundle.dumpLogcatCommand(buffer), 12000L, 1024 * 1024));
+                BppDiagnosticBundle.dumpLogcatCommand(buffer, pid), 12000L, 1024 * 1024));
             if (sb.length() > 4 * 1024 * 1024) break;
             sb.append('\n');
         }
@@ -136,37 +159,24 @@ public final class BppDiagnosticSessionLog {
         return denied && !lower.contains("beginning of");
     }
 
-    private static void startRolling(Context context, String role) {
+    private static void startRolling(final Context context, final String role, final int pid) {
         File dir = null;
         try {
             dir = diagnosticsDir(context);
             if (!dir.isDirectory() && !dir.mkdirs()) return;
-            File output = new File(dir, role + "-logcat");
-            if (logcatAlreadyRunning(output.getAbsolutePath())) {
-                meta(dir, role, "capture-already-running", output, "");
-                return;
-            }
-            ProcessBuilder pb = new ProcessBuilder(BppDiagnosticBundle.rollingLogcatCommand(output));
-            File stderr = new File(dir, role + "-logcat.stderr");
-            pb.redirectError(stderr);
-            pb.directory(dir);
-            Process process = pb.start();
-            try {
-                process.getOutputStream().close();
-            } catch (IOException ignored) {
-            }
-            int pid = processPid(process);
-            if (pid > 0) {
-                BppDiagnosticBundle.appendCapped(new File(dir, role + "-logcat.pid"), Integer.toString(pid), 64);
-            }
-            try {
-                Thread.sleep(400L);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
-            String state = process.isAlive() ? "running" : ("exited:" + exitValue(process));
-            String err = readSmall(stderr, 1500);
-            meta(dir, role, "capture-start state=" + state + " childPid=" + pid, output, err);
+            final File output = new File(dir, role + "-logcat");
+            BppDiagnosticBundle.appendCapped(
+                new File(dir, role + "-logcat.pid"),
+                Integer.toString(pid > 0 ? pid : android.os.Process.myPid()),
+                64
+            );
+            meta(dir, role, "capture-start mode=periodic-dump pidFilter=" + pid, output, "");
+            ROLLING.scheduleAtFixedRate(new Runnable() {
+                @Override
+                public void run() {
+                    captureIncremental(context, role, pid, output);
+                }
+            }, 0L, 2L, TimeUnit.SECONDS);
         } catch (Throwable error) {
             try {
                 if (dir == null) dir = diagnosticsDir(context);
@@ -175,6 +185,33 @@ public final class BppDiagnosticSessionLog {
                 }
             } catch (Throwable ignored) {
             }
+        }
+    }
+
+    private static void captureIncremental(Context context, String role, int pid, File output) {
+        try {
+            String dump = dumpLogcat(pid);
+            if (isFailedDump(dump) && (dump == null || dump.indexOf('\n') < 0)) {
+                File dir = diagnosticsDir(context);
+                if (dir.isDirectory() || dir.mkdirs()) {
+                    BppDiagnosticBundle.appendCapped(new File(dir, role + "-logcat.stderr"), oneLine(dump), 8000);
+                }
+                return;
+            }
+            String marker;
+            synchronized (MARKERS) {
+                marker = MARKERS.get(role);
+            }
+            String suffix = BppDiagnosticBundle.suffixAfterMarker(dump, marker);
+            String nextMarker = BppDiagnosticBundle.lastLogLine(dump);
+            if (nextMarker.length() > 0) {
+                synchronized (MARKERS) {
+                    MARKERS.put(role, nextMarker);
+                }
+            }
+            if (suffix.length() == 0) return;
+            BppDiagnosticBundle.appendCapped(output, suffix, 4 * 1024 * 1024);
+        } catch (Throwable ignored) {
         }
     }
 

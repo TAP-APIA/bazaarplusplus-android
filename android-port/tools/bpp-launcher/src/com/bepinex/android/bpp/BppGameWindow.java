@@ -98,6 +98,12 @@ public final class BppGameWindow {
             logClass.getMethod("ensureCapture", contextClass, String.class).invoke(null, activity, "game");
         } catch (Throwable ignored) {
         }
+        try {
+            Class.forName("com.bepinex.android.bpp.BppGameProcess")
+                .getMethod("markPluginsReady")
+                .invoke(null);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static final class WindowBinding implements ViewTreeObserver.OnWindowFocusChangeListener {

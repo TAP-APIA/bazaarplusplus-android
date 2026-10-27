@@ -88,6 +88,22 @@ def _collect_metadata(axml: bytes) -> dict[str, str]:
     return metadata
 
 
+def _collect_providers(axml: bytes) -> dict[str, dict[str, str]]:
+    _, _, pool_size = struct.unpack_from("<HHI", axml, 8)
+    strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    off = 8 + pool_size
+    providers: dict[str, dict[str, str]] = {}
+    while off < len(axml):
+        ct, _ch, cs = struct.unpack_from("<HHI", axml, off)
+        chunk = axml[off : off + cs]
+        if ct == RES_XML_START_ELEMENT_TYPE:
+            el, attrs = _get_start_element_info(chunk, strings)
+            if el == "provider" and attrs.get("name"):
+                providers[attrs["name"]] = attrs
+        off += cs
+    return providers
+
+
 def main() -> int:
     apk_path = (
         Path(sys.argv[1])
@@ -137,6 +153,14 @@ def main() -> int:
     assert _collect_activities(repacked) == _collect_activities(patched), "Repack changed activities or filters"
     stable = patch_manifest_bytes(repacked, version_code=39, version_name="6.0.0", allow_repack=True)
     assert _read_manifest_version(stable) == (39, "6.0.0")
+    providers = _collect_providers(stable)
+    game = providers.get("com.bepinex.android.bpp.BppGameProcess")
+    assert game is not None, f"Missing :game diagnostics provider: {providers}"
+    assert game.get("process") == ":game", game
+    assert game.get("exported") == "0x0", game
+    assert game.get("authorities") == "com.bepinex.android.bpp.game-process", game
+    again = patch_manifest_bytes(stable, version_code=40, version_name="6.0.0-preview.40", allow_repack=True)
+    assert list(_collect_providers(again)).count("com.bepinex.android.bpp.BppGameProcess") == 1
     assert _collect_activities(stable) == _collect_activities(patched)
     assert _collect_metadata(stable) == _collect_metadata(patched)
 

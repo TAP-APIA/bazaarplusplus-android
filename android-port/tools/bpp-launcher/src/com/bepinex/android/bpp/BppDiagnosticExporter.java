@@ -63,6 +63,10 @@ public final class BppDiagnosticExporter {
         "modpacks/bpp/modpack.json",
         "modpacks/bpp/config/BazaarPlusPlus.cfg",
         "modpacks/bpp/logs",
+        "BepInEx/logs",
+        "BepInEx/interop",
+        "BepInEx/unity-libs",
+        "BepInEx/dummy",
         "PersistentData",
         "Player.log"
     };
@@ -242,6 +246,14 @@ public final class BppDiagnosticExporter {
         texts.add(new BppDiagnosticBundle.TextEntry("logs/expected-paths.txt", safeSection(errors, "expected-logs", new Section() {
             @Override public String run() { return expectedPaths(activity, gameRoot); }
         })));
+        texts.add(new BppDiagnosticBundle.TextEntry("logs/directories.txt", safeSection(errors, "log-dirs", new Section() {
+            @Override public String run() { return logDirectories(activity, gameRoot); }
+        })));
+        texts.add(new BppDiagnosticBundle.TextEntry("state/datastore/keys.txt", safeSection(errors, "datastore-keys", new Section() {
+            @Override public String run() {
+                return datastoreKeys(new File(activity.getDataDir(), "files/datastore"));
+            }
+        })));
         texts.add(new BppDiagnosticBundle.TextEntry("crashes/tombstone-probes.txt", safeSection(errors, "tombstones", new Section() {
             @Override public String run() { return tombstoneProbes(activity, gameRoot); }
         })));
@@ -273,6 +285,8 @@ public final class BppDiagnosticExporter {
         addScan(scans, new File("/sdcard/Android/data/" + gamePackage + "/files"), "collected/android-data-game", false);
         addScan(scans, new File("/storage/emulated/0/Android/data/" + gamePackage + "/files"), "collected/android-data-game-emulated", false);
         addReadableTombstones(scans, activity, gameRoot);
+        harvestLogs(extras, gameRoot, "logs/game-root");
+        harvestLogs(extras, activity.getExternalFilesDir(null), "logs/external-files");
 
         StringBuilder notes = new StringBuilder();
         for (int i = 0; i < errors.size(); i++) notes.append(errors.get(i)).append('\n');
@@ -812,6 +826,11 @@ public final class BppDiagnosticExporter {
         }
         hashIfPresent(sb, "runtimeDll", gameRoot == null ? null : new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.dll"));
         hashIfPresent(sb, "modpackDll", gameRoot == null ? null : new File(gameRoot, "modpacks/bpp/plugins/BazaarPlusPlus.dll"));
+        appendTreeSummary(sb, "interop", gameRoot == null ? null : new File(gameRoot, "BepInEx/interop"), ".dll");
+        appendTreeSummary(sb, "unityLibs", gameRoot == null ? null : new File(gameRoot, "BepInEx/unity-libs"), null);
+        appendTreeSummary(sb, "dummy", gameRoot == null ? null : new File(gameRoot, "BepInEx/dummy"), null);
+        appendTreeSummary(sb, "bepInExLogs", gameRoot == null ? null : new File(gameRoot, "BepInEx/logs"), null);
+        appendTreeSummary(sb, "modpackLogs", gameRoot == null ? null : new File(gameRoot, "modpacks/bpp/logs"), null);
         try (InputStream in = activity.getAssets().open(BppBundledModpackInstaller.ASSET_MODPACK_MANIFEST)) {
             BppBundledModpackInstaller.Manifest manifest = BppBundledModpackInstaller.parseManifest(in);
             sb.append("bundledBundle=").append(manifest.bundleId)
@@ -829,13 +848,86 @@ public final class BppDiagnosticExporter {
         } catch (Throwable error) {
             sb.append("bundledManifest=unavailable ").append(error).append('\n');
         }
-        try (AssetFileDescriptor fd = activity.getAssets().openFd(BppBundledModpackInstaller.ASSET_MODPACK_ZIP)) {
-            sb.append("bundledZipDeclaredLength=").append(fd.getLength()).append('\n');
+        try (InputStream in = activity.getAssets().open(BppBundledModpackInstaller.ASSET_MODPACK_ZIP)) {
+            byte[] buf = new byte[8192];
+            long total = 0L;
+            int n;
+            while ((n = in.read(buf)) != -1) total += n;
+            sb.append("bundledZipStreamLength=").append(total).append('\n');
         } catch (Throwable error) {
-            sb.append("bundledZipDeclaredLength=unavailable ").append(error.getClass().getSimpleName())
+            sb.append("bundledZipStreamLength=unavailable ").append(error.getClass().getSimpleName())
                 .append(' ').append(error.getMessage()).append('\n');
         }
         return sb.toString();
+    }
+
+    private static void appendTreeSummary(StringBuilder sb, String label, File dir, String suffix) {
+        BppDiagnosticBundle.DirStat stat = BppDiagnosticBundle.summarizeTree(dir, suffix, 3);
+        sb.append(label)
+            .append(" path=").append(dir == null ? "null" : dir.getAbsolutePath())
+            .append(" missing=").append(stat.missing)
+            .append(" unreadable=").append(stat.unreadable)
+            .append(" files=").append(stat.files)
+            .append(" bytes=").append(stat.bytes)
+            .append('\n');
+    }
+
+    private static String logDirectories(Context context, File gameRoot) {
+        StringBuilder sb = new StringBuilder();
+        File[] dirs = new File[] {
+            gameRoot == null ? null : new File(gameRoot, "BepInEx/logs"),
+            gameRoot == null ? null : new File(gameRoot, "modpacks/bpp/logs"),
+            gameRoot == null ? null : new File(gameRoot, "BepInEx/interop"),
+            gameRoot == null ? null : new File(gameRoot, "BepInEx/unity-libs"),
+            gameRoot == null ? null : new File(gameRoot, "BepInEx/dummy"),
+            context.getExternalFilesDir(null)
+        };
+        for (int i = 0; i < dirs.length; i++) {
+            sb.append("====\n").append(BppDiagnosticBundle.describeDirectory(dirs[i], 80));
+        }
+        return sb.toString();
+    }
+
+    private static String datastoreKeys(File dir) {
+        StringBuilder sb = new StringBuilder();
+        if (dir == null || !dir.exists()) return "(missing)\n";
+        if (!dir.isDirectory()) return "(not a directory)\n";
+        File[] files = dir.listFiles();
+        if (files == null) return "(unreadable)\n";
+        Arrays.sort(files, new java.util.Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return a.getName().compareTo(b.getName());
+            }
+        });
+        if (files.length == 0) sb.append("(empty)\n");
+        for (int i = 0; i < files.length; i++) {
+            File file = files[i];
+            String name = file.getName().toLowerCase(java.util.Locale.ROOT);
+            if (!name.endsWith(".preferences_pb") && !name.endsWith(".pb")) continue;
+            sb.append("## ").append(file.getName()).append(" bytes=").append(file.length()).append('\n');
+            try {
+                sb.append(BppDiagnosticBundle.decodePreferenceProto(BppDiagnosticBundle.readPrefix(file, 256 * 1024)));
+            } catch (Throwable error) {
+                sb.append("unavailable ").append(error.getClass().getSimpleName()).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static void harvestLogs(List<BppDiagnosticBundle.ExtraFile> extras, File root, String prefix) {
+        if (root == null || extras == null) return;
+        List<File> logs = BppDiagnosticBundle.findLogFiles(root, 200);
+        String rootPath = root.getAbsolutePath();
+        for (int i = 0; i < logs.size(); i++) {
+            File file = logs.get(i);
+            String path = file.getAbsolutePath();
+            String relative = path.startsWith(rootPath) ? path.substring(rootPath.length()) : file.getName();
+            while (relative.startsWith("/")) relative = relative.substring(1);
+            relative = relative.replace('\\', '/');
+            if (relative.length() == 0) relative = file.getName();
+            extras.add(new BppDiagnosticBundle.ExtraFile(file, prefix + "/" + relative, true));
+        }
     }
 
     private static String expectedPaths(Context context, File gameRoot) {
@@ -956,19 +1048,24 @@ public final class BppDiagnosticExporter {
                 long pss = longCall(info, "getPss");
                 long rss = longCall(info, "getRss");
                 int pid = intCall(info, "getPid");
+                int subReason = intCall(info, "getSubReason");
                 String description = stringCall(info, "getDescription");
-                String reasonName = reasonName(info, reason);
+                String processState = stringCall(info, "getProcessStateSummary");
                 sb.append("--- ").append(i)
                     .append(" time=").append(formatTime(timestamp))
                     .append(" pid=").append(pid)
                     .append(" process=").append(process)
                     .append(" reason=").append(reason)
-                    .append(" reasonName=").append(reasonName)
+                    .append(" reasonName=").append(BppDiagnosticBundle.exitReasonName(reason))
+                    .append(" subReason=").append(subReason)
+                    .append(" subReasonName=").append(BppDiagnosticBundle.exitSubReasonName(subReason))
                     .append(" status=").append(status)
                     .append(" importance=").append(importance)
+                    .append(" importanceName=").append(BppDiagnosticBundle.importanceName(importance))
                     .append(" pss=").append(pss)
                     .append(" rss=").append(rss)
                     .append(" description=").append(description)
+                    .append(" processStateSummary=").append(processState)
                     .append('\n');
                 writeTrace(info, stage, extras, i, process, sb);
             }
@@ -1257,14 +1354,32 @@ public final class BppDiagnosticExporter {
         }
     }
 
-    private static String reasonName(Object info, int reason) {
+    static String latestGameExitNote(Context context) {
+        if (context == null || Build.VERSION.SDK_INT < 30) return "";
         try {
-            Method method = info.getClass().getMethod("reasonCodeToString", int.class);
-            Object value = method.invoke(null, Integer.valueOf(reason));
-            return value == null ? "" : String.valueOf(value);
-        } catch (Throwable error) {
-            return "unavailable";
+            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return "";
+            Method historical = ActivityManager.class.getMethod(
+                "getHistoricalProcessExitReasons", String.class, int.class, int.class);
+            Object raw = historical.invoke(am, context.getPackageName(), Integer.valueOf(0), Integer.valueOf(20));
+            if (!(raw instanceof List)) return "";
+            List<?> infos = (List<?>) raw;
+            for (int i = 0; i < infos.size(); i++) {
+                Object info = infos.get(i);
+                if (info == null) continue;
+                String process = stringCall(info, "getProcessName");
+                if (process == null || !process.endsWith(":game")) continue;
+                int reason = intCall(info, "getReason");
+                int importance = intCall(info, "getImportance");
+                return "reason=" + reason
+                    + " reasonName=" + BppDiagnosticBundle.exitReasonName(reason)
+                    + " importance=" + importance
+                    + " importanceName=" + BppDiagnosticBundle.importanceName(importance)
+                    + " time=" + formatTime(longCall(info, "getTimestamp"));
+            }
+        } catch (Throwable ignored) {
         }
+        return "";
     }
 
     private static String sha256(byte[] data) throws Exception {

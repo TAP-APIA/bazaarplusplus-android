@@ -161,7 +161,7 @@ public final class BppDiagnosticBundle {
             + "- device/          厂商、机型、指纹、Android / SDK、ABI、页大小、安全补丁、内存、存储、屏幕与刘海、getprop\n"
             + "- packages/        启动器与 The Bazaar 的版本、安装时间、签名证书 SHA-256、分包 APK、libil2cpp 大小、哈希和 ELF 对齐\n"
             + "- deploy/          内置模组部署状态、状态文件、目录树、清单\n"
-            + "- launch/          每次点击启动的记录，以及启动器进程和 :game 进程的滚动 logcat\n"
+            + "- launch/          每次点击启动的记录、gamePid、滚动 logcat、game-heartbeat.log 和卡住时的线程堆栈\n"
             + "- logcat/          点导出时能读到的各 buffer 转储\n"
             + "- logs/            BepInEx LogOutput、preloader、BPP trace、Unity Player.log、配置、可读 tombstone\n"
             + "- crashes/         getHistoricalProcessExitReasons（含 :game）和 trace；系统 tombstone 目录若不可读会记在 manifest\n"
@@ -176,19 +176,51 @@ public final class BppDiagnosticBundle {
             + "exported after returning to this app.\n";
     }
 
-    public static List<String> rollingLogcatCommand(File outputFile) {
-        String path = outputFile == null ? "bpp-logcat" : outputFile.getAbsolutePath();
-        return Arrays.asList(
-            "logcat",
-            "-v", "threadtime",
-            "-b", "main",
-            "-b", "system",
-            "-b", "crash",
-            "-b", "events",
-            "-f", path,
-            "-r", "4096",
-            "-n", "4"
-        );
+    /**
+     * Periodic {@code logcat -d} (the process exits, so its output is flushed).
+     * {@code logcat -f} block-buffers about 8 KB and a grey-screen capture then stops at that size.
+     */
+    public static List<String> rollingLogcatCommand(File ignored) {
+        return rollingLogcatCommand(0);
+    }
+
+    public static List<String> rollingLogcatCommand(int pid) {
+        List<String> command = new ArrayList<String>();
+        command.add("logcat");
+        command.add("-d");
+        command.add("-v");
+        command.add("threadtime");
+        command.add("-b");
+        command.add("main");
+        command.add("-b");
+        command.add("system");
+        command.add("-b");
+        command.add("crash");
+        command.add("-b");
+        command.add("events");
+        if (pid > 0) command.add("--pid=" + pid);
+        return command;
+    }
+
+    /** Lines after the previous dump's last line. A missing marker means the ring buffer rotated. */
+    public static String suffixAfterMarker(String dump, String markerLine) {
+        if (dump == null || dump.length() == 0) return "";
+        if (markerLine == null || markerLine.length() == 0) return dump;
+        int at = dump.lastIndexOf(markerLine);
+        if (at < 0) return "[buffer-rotated]\n" + dump;
+        int next = at + markerLine.length();
+        if (next < dump.length() && dump.charAt(next) == '\n') next++;
+        if (next >= dump.length()) return "";
+        return dump.substring(next);
+    }
+
+    public static String lastLogLine(String dump) {
+        if (dump == null) return "";
+        int end = dump.length();
+        while (end > 0 && (dump.charAt(end - 1) == '\n' || dump.charAt(end - 1) == '\r')) end--;
+        if (end == 0) return "";
+        int start = dump.lastIndexOf('\n', end - 1);
+        return dump.substring(start + 1, end);
     }
 
     public static final String[] LOGCAT_BUFFERS = new String[] {
@@ -196,10 +228,19 @@ public final class BppDiagnosticBundle {
     };
 
     public static List<String> dumpLogcatCommand(String buffer) {
-        if (buffer == null || buffer.length() == 0 || "all".equals(buffer)) {
-            return Arrays.asList("logcat", "-d", "-v", "threadtime", "-b", "all");
-        }
-        return Arrays.asList("logcat", "-d", "-v", "threadtime", "-b", buffer);
+        return dumpLogcatCommand(buffer, 0);
+    }
+
+    public static List<String> dumpLogcatCommand(String buffer, int pid) {
+        List<String> command = new ArrayList<String>();
+        command.add("logcat");
+        command.add("-d");
+        command.add("-v");
+        command.add("threadtime");
+        command.add("-b");
+        command.add(buffer == null || buffer.length() == 0 ? "all" : buffer);
+        if (pid > 0) command.add("--pid=" + pid);
+        return command;
     }
 
     public static boolean commandClearsLogcat(List<String> command) {
@@ -1171,6 +1212,440 @@ public final class BppDiagnosticBundle {
 
     private enum Mode {
         FULL, TAIL, HEAD
+    }
+
+    public static final String FIRST_RUN_OVERLAY_TEXT =
+        "首次启动正在生成模组文件，可能需要几分钟，请保持在前台，不要切走";
+
+    public static final class GenerationProbe {
+        public int unityLibFiles;
+        public long unityZipBytes;
+        public int interopFiles;
+        public long interopBytes;
+        public int interopFilesAtStart;
+        public int dummyFiles;
+        public boolean logIsNew;
+        public long logOutputBytes;
+    }
+
+    public static String generationStageId(GenerationProbe probe) {
+        if (probe == null) return "starting";
+        if (probe.logIsNew && probe.interopFiles > 0) return "plugins";
+        if (probe.interopFiles > probe.interopFilesAtStart) return "interop";
+        if (probe.interopFilesAtStart > 0) return "plugins";
+        if (probe.dummyFiles > 0 || probe.unityLibFiles >= 15) return "cpp2il";
+        if (probe.unityZipBytes > 0 || probe.unityLibFiles > 0) return "unity-libs";
+        return "starting";
+    }
+
+    public static String generationStageLabel(String stageId) {
+        if ("unity-libs".equals(stageId)) return "正在准备 Unity 基础库";
+        if ("cpp2il".equals(stageId)) return "正在分析游戏代码（Cpp2IL / interop）";
+        if ("interop".equals(stageId)) return "正在写入 interop 程序集";
+        if ("plugins".equals(stageId)) return "正在加载模组";
+        if ("ready".equals(stageId)) return "已进入游戏";
+        return "正在启动";
+    }
+
+    /** -1 when a percentage would be a guess. Cpp2IL writes no files until it finishes. */
+    public static int generationPercent(GenerationProbe probe, int interopBaseline) {
+        if (probe == null) return -1;
+        String stage = generationStageId(probe);
+        if ("starting".equals(stage)) return 2;
+        if ("unity-libs".equals(stage)) return probe.unityLibFiles > 0 ? 15 : 8;
+        if ("cpp2il".equals(stage)) return -1;
+        if ("interop".equals(stage)) {
+            int gained = probe.interopFiles - probe.interopFilesAtStart;
+            if (interopBaseline > 0 && gained >= 0) {
+                return Math.min(90, 20 + gained * 70 / Math.max(1, interopBaseline));
+            }
+            return -1;
+        }
+        if ("plugins".equals(stage)) return 95;
+        if ("ready".equals(stage)) return 100;
+        return -1;
+    }
+
+    public static String enableDiagnosticLogging(String cfg) {
+        String text = cfg == null ? "" : cfg;
+        text = replaceAssignment(text, "UnityLogListening", "true");
+        text = replaceAssignment(text, "WriteUnityLog", "true");
+        text = replaceAssignment(text, "InstantFlushing", "true");
+        return text;
+    }
+
+    public static String exitReasonName(int reason) {
+        switch (reason) {
+            case 0: return "UNKNOWN";
+            case 1: return "EXIT_SELF";
+            case 2: return "SIGNALED";
+            case 3: return "LOW_MEMORY";
+            case 4: return "CRASH";
+            case 5: return "CRASH_NATIVE";
+            case 6: return "ANR";
+            case 7: return "INITIALIZATION_FAILURE";
+            case 8: return "PERMISSION_CHANGE";
+            case 9: return "EXCESSIVE_RESOURCE_USAGE";
+            case 10: return "USER_REQUESTED";
+            case 11: return "USER_STOPPED";
+            case 12: return "DEPENDENCY_DIED";
+            case 13: return "OTHER";
+            case 14: return "FREEZER";
+            case 15: return "PACKAGE_STATE_CHANGE";
+            case 16: return "PACKAGE_UPDATED";
+            default: return "REASON_" + reason;
+        }
+    }
+
+    public static String exitSubReasonName(int subReason) {
+        switch (subReason) {
+            case 0: return "UNKNOWN";
+            case 1: return "WAIT_FOR_DEBUGGER";
+            case 2: return "TOO_MANY_CACHED";
+            case 3: return "TOO_MANY_EMPTY";
+            case 4: return "TRIM_EMPTY";
+            case 5: return "LARGE_CACHED";
+            case 6: return "MEMORY_PRESSURE";
+            case 7: return "EXCESSIVE_CPU";
+            case 8: return "SYSTEM_UPDATE_DONE";
+            case 9: return "KILL_ALL_FG";
+            case 10: return "KILL_ALL_BG_EXCEPT";
+            case 11: return "KILL_UID";
+            case 12: return "KILL_PID";
+            case 13: return "INVALID_START";
+            case 14: return "INVALID_STATE";
+            case 15: return "IMPERCEPTIBLE";
+            case 16: return "REMOVE_LRU";
+            case 17: return "ISOLATED_NOT_NEEDED";
+            case 18: return "CACHED_IDLE_FORCED_APP_STANDBY";
+            case 19: return "FREEZER_BINDER_IOCTL";
+            case 20: return "FREEZER_BINDER_TRANSACTION";
+            case 21: return "FORCE_STOP";
+            case 22: return "REMOVE_TASK";
+            case 23: return "STOP_APP";
+            case 24: return "KILL_BACKGROUND";
+            case 25: return "PACKAGE_UPDATE";
+            default:
+                if (subReason < 0) return "unavailable";
+                return "SUBREASON_" + subReason;
+        }
+    }
+
+    public static String importanceName(int importance) {
+        switch (importance) {
+            case 100: return "FOREGROUND";
+            case 125: return "FOREGROUND_SERVICE";
+            case 130: return "PERCEPTIBLE_PRE_26";
+            case 150: return "TOP_SLEEPING_PRE_23";
+            case 200: return "VISIBLE";
+            case 230: return "PERCEPTIBLE";
+            case 300: return "SERVICE";
+            case 325: return "TOP_SLEEPING";
+            case 350: return "CANT_SAVE_STATE";
+            case 400: return "CACHED";
+            case 500: return "EMPTY";
+            case 1000: return "GONE";
+            default:
+                if (importance < 0) return "unavailable";
+                return "IMPORTANCE_" + importance;
+        }
+    }
+
+    public static String describeDirectory(File dir, int maxEntries) {
+        StringBuilder sb = new StringBuilder();
+        if (dir == null) return "path=null\n";
+        sb.append("path=").append(dir.getAbsolutePath())
+            .append(" exists=").append(dir.exists())
+            .append(" readable=").append(dir.canRead())
+            .append(" directory=").append(dir.isDirectory())
+            .append('\n');
+        if (!dir.exists()) return sb.toString();
+        if (!dir.isDirectory()) {
+            sb.append("size=").append(dir.length()).append(" mtime=").append(dir.lastModified()).append('\n');
+            return sb.toString();
+        }
+        String[] names = dir.list();
+        if (names == null) {
+            sb.append("children=unreadable\n");
+            return sb.toString();
+        }
+        Arrays.sort(names);
+        if (names.length == 0) sb.append("children=empty\n");
+        else sb.append("children=").append(names.length).append('\n');
+        int shown = Math.min(names.length, Math.max(0, maxEntries));
+        long bytes = 0L;
+        int files = 0;
+        for (int i = 0; i < names.length; i++) {
+            File child = new File(dir, names[i]);
+            boolean directory = child.isDirectory();
+            long size = directory ? -1L : child.length();
+            if (!directory && child.isFile()) {
+                files++;
+                bytes += Math.max(0L, size);
+            }
+            if (i < shown) {
+                sb.append(names[i]).append('\t').append(directory ? "dir" : Long.toString(size))
+                    .append('\t').append(child.lastModified()).append('\n');
+            }
+        }
+        if (names.length > shown) sb.append("... ").append(names.length - shown).append(" more\n");
+        sb.append("fileCount=").append(files).append(" fileBytes=").append(bytes).append('\n');
+        return sb.toString();
+    }
+
+    public static final class DirStat {
+        public final boolean missing;
+        public final boolean unreadable;
+        public final int files;
+        public final long bytes;
+
+        DirStat(boolean missing, boolean unreadable, int files, long bytes) {
+            this.missing = missing;
+            this.unreadable = unreadable;
+            this.files = files;
+            this.bytes = bytes;
+        }
+    }
+
+    public static DirStat summarizeTree(File dir, String suffix, int maxDepth) {
+        if (dir == null || !dir.exists()) return new DirStat(true, false, 0, 0L);
+        if (!dir.isDirectory()) {
+            boolean take = suffix == null || dir.getName().toLowerCase(Locale.ROOT).endsWith(suffix);
+            return new DirStat(false, !dir.canRead(), take && dir.isFile() ? 1 : 0, take && dir.isFile() ? dir.length() : 0L);
+        }
+        if (dir.list() == null && !dir.canRead()) return new DirStat(false, true, 0, 0L);
+        long[] totals = new long[] {0L, 0L};
+        accumulate(dir, suffix == null ? null : suffix.toLowerCase(Locale.ROOT), 0, Math.max(0, maxDepth), totals);
+        return new DirStat(false, false, (int) totals[0], totals[1]);
+    }
+
+    public static List<File> findLogFiles(File root, int maxFiles) {
+        List<File> found = new ArrayList<File>();
+        if (root == null || !root.isDirectory() || maxFiles <= 0) return found;
+        collectLogs(root, root, 0, maxFiles, found);
+        return found;
+    }
+
+    public static void appendIfRoom(File file, String line, int maxBytes) throws IOException {
+        if (file == null) throw new IOException("missing append target");
+        String payload = line == null ? "\n" : (line.endsWith("\n") ? line : line + "\n");
+        byte[] incoming = payload.getBytes(StandardCharsets.UTF_8);
+        File parent = file.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IOException("cannot create " + parent.getAbsolutePath());
+        }
+        synchronized (BppDiagnosticBundle.class) {
+            long existing = file.isFile() ? file.length() : 0L;
+            if (existing >= maxBytes) return;
+            try (FileOutputStream out = new FileOutputStream(file, true)) {
+                int allow = (int) Math.min(incoming.length, Math.max(0L, maxBytes - existing));
+                out.write(incoming, 0, allow);
+                out.flush();
+                out.getFD().sync();
+            }
+        }
+    }
+
+    public static String decodePreferenceProto(byte[] data) {
+        StringBuilder sb = new StringBuilder();
+        if (data == null || data.length == 0) return "(empty)\n";
+        int index = 0;
+        int entries = 0;
+        try {
+            while (index < data.length) {
+                long[] tag = readVarint(data, index);
+                if (tag == null) break;
+                index = (int) tag[1];
+                int field = (int) (tag[0] >>> 3);
+                int wire = (int) (tag[0] & 7);
+                if (wire == 2) {
+                    long[] length = readVarint(data, index);
+                    if (length == null) break;
+                    index = (int) length[1];
+                    int size = (int) length[0];
+                    if (size < 0 || index + size > data.length) break;
+                    if (field == 1) {
+                        String parsed = parsePreferenceEntry(data, index, index + size);
+                        if (parsed != null) {
+                            sb.append(parsed).append('\n');
+                            entries++;
+                        }
+                    }
+                    index += size;
+                } else if (wire == 0) {
+                    long[] value = readVarint(data, index);
+                    if (value == null) break;
+                    index = (int) value[1];
+                } else if (wire == 5) {
+                    index += 4;
+                } else if (wire == 1) {
+                    index += 8;
+                } else {
+                    break;
+                }
+            }
+        } catch (RuntimeException ex) {
+            sb.append("decodeError=").append(ex.getClass().getSimpleName()).append('\n');
+        }
+        if (entries == 0 && sb.length() == 0) sb.append("(no preference keys)\n");
+        return sb.toString();
+    }
+
+    private static String parsePreferenceEntry(byte[] data, int start, int end) {
+        String key = null;
+        String value = null;
+        int index = start;
+        while (index < end) {
+            long[] tag = readVarint(data, index);
+            if (tag == null) break;
+            index = (int) tag[1];
+            int field = (int) (tag[0] >>> 3);
+            int wire = (int) (tag[0] & 7);
+            if (wire == 2) {
+                long[] length = readVarint(data, index);
+                if (length == null) break;
+                index = (int) length[1];
+                int size = (int) length[0];
+                if (size < 0 || index + size > end) break;
+                if (field == 1) key = new String(data, index, size, StandardCharsets.UTF_8);
+                else if (field == 2) value = parsePreferenceValue(data, index, index + size);
+                index += size;
+            } else if (wire == 0) {
+                long[] skipped = readVarint(data, index);
+                if (skipped == null) break;
+                index = (int) skipped[1];
+            } else if (wire == 5) {
+                index += 4;
+            } else if (wire == 1) {
+                index += 8;
+            } else {
+                break;
+            }
+        }
+        if (key == null) return null;
+        if (value == null) value = "";
+        if (isSecretKey(key)) value = "[redacted]";
+        return key + "=" + value;
+    }
+
+    private static String parsePreferenceValue(byte[] data, int start, int end) {
+        int index = start;
+        while (index < end) {
+            long[] tag = readVarint(data, index);
+            if (tag == null) return "unavailable";
+            index = (int) tag[1];
+            int field = (int) (tag[0] >>> 3);
+            int wire = (int) (tag[0] & 7);
+            if (wire == 0) {
+                long[] value = readVarint(data, index);
+                if (value == null) return "unavailable";
+                index = (int) value[1];
+                if (field == 1) return value[0] != 0 ? "true" : "false";
+                if (field == 3 || field == 4) return Long.toString(value[0]);
+            } else if (wire == 5 && index + 4 <= end) {
+                int bits = (data[index] & 0xff) | ((data[index + 1] & 0xff) << 8)
+                    | ((data[index + 2] & 0xff) << 16) | ((data[index + 3] & 0xff) << 24);
+                index += 4;
+                if (field == 2) return Float.toString(Float.intBitsToFloat(bits));
+            } else if (wire == 1 && index + 8 <= end) {
+                long bits = 0L;
+                for (int b = 0; b < 8; b++) bits |= ((long) (data[index + b] & 0xff)) << (8 * b);
+                index += 8;
+                if (field == 7) return Double.toString(Double.longBitsToDouble(bits));
+            } else if (wire == 2) {
+                long[] length = readVarint(data, index);
+                if (length == null) return "unavailable";
+                index = (int) length[1];
+                int size = (int) length[0];
+                if (size < 0 || index + size > end) return "unavailable";
+                if (field == 5) return new String(data, index, size, StandardCharsets.UTF_8);
+                if (field == 8) return "bytes:" + size;
+                if (field == 6) return "string_set";
+                index += size;
+                continue;
+            } else {
+                return "unavailable";
+            }
+        }
+        return "";
+    }
+
+    private static boolean isSecretKey(String key) {
+        String lower = key.toLowerCase(Locale.ROOT);
+        return lower.contains("password") || lower.contains("secret") || lower.contains("token")
+            || lower.contains("keystore") || lower.contains("credential") || lower.contains("lineage");
+    }
+
+    private static long[] readVarint(byte[] data, int index) {
+        long value = 0L;
+        int shift = 0;
+        while (index < data.length && shift < 64) {
+            int piece = data[index] & 0xff;
+            index++;
+            value |= (long) (piece & 0x7f) << shift;
+            if ((piece & 0x80) == 0) return new long[] {value, index};
+            shift += 7;
+        }
+        return null;
+    }
+
+    private static String replaceAssignment(String cfg, String key, String value) {
+        String[] lines = cfg.split("\n", -1);
+        boolean found = false;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            int equals = line.indexOf('=');
+            if (equals > 0 && line.substring(0, equals).trim().equals(key) && !line.trim().startsWith("#")) {
+                line = key + " = " + value;
+                found = true;
+            }
+            sb.append(line);
+            if (i + 1 < lines.length) sb.append('\n');
+        }
+        if (!found) {
+            if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') sb.append('\n');
+            sb.append(key).append(" = ").append(value).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static void accumulate(File dir, String suffix, int depth, int maxDepth, long[] totals) {
+        if (depth > maxDepth || totals[0] > 200000) return;
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (int i = 0; i < children.length; i++) {
+            File child = children[i];
+            if (child.isDirectory()) {
+                accumulate(child, suffix, depth + 1, maxDepth, totals);
+            } else if (child.isFile()) {
+                if (suffix != null && !child.getName().toLowerCase(Locale.ROOT).endsWith(suffix)) continue;
+                totals[0]++;
+                totals[1] += Math.max(0L, child.length());
+            }
+        }
+    }
+
+    private static void collectLogs(File root, File dir, int depth, int maxFiles, List<File> found) {
+        if (depth > MAX_SCAN_DEPTH || found.size() >= maxFiles) return;
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        Arrays.sort(children, new Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return a.getName().compareTo(b.getName());
+            }
+        });
+        for (int i = 0; i < children.length && found.size() < maxFiles; i++) {
+            File child = children[i];
+            String name = child.getName();
+            if (isSensitivePath(name) || isSymlinkEscape(root, child)) continue;
+            if (child.isDirectory()) {
+                collectLogs(root, child, depth + 1, maxFiles, found);
+            } else if (child.isFile() && isLogName(name.toLowerCase(Locale.ROOT))) {
+                found.add(child);
+            }
+        }
     }
 
     private static final class Budget {

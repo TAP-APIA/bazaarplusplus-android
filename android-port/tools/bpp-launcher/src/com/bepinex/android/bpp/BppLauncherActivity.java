@@ -15,6 +15,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -85,6 +87,9 @@ public final class BppLauncherActivity extends Activity {
     private Button btnDownloadUpdate;
     private Button btnExportDiagnostics;
     private TextView tvExportInfo;
+    private TextView tvGenerationHint;
+    private boolean generationWarningAccepted;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile boolean exportingDiagnostics;
     private boolean checkingUpdate;
     private boolean updateChecked;
@@ -127,6 +132,7 @@ public final class BppLauncherActivity extends Activity {
         if (!updateChecked) checkLauncherUpdate();
         showLauncherUpdatePrompt();
         clearPendingCrashBanner();
+        refreshGenerationHint();
         boolean requestAutoLaunch = !autoLaunchConsumed
             && getIntent() != null
             && getIntent().getBooleanExtra(EXTRA_AUTO_LAUNCH, false);
@@ -148,6 +154,7 @@ public final class BppLauncherActivity extends Activity {
         worker.shutdownNow();
         updateWorker.shutdownNow();
         diagnosticWorker.shutdownNow();
+        mainHandler.removeCallbacksAndMessages(null);
     }
 
     private View buildContentView() {
@@ -286,7 +293,19 @@ public final class BppLauncherActivity extends Activity {
         btnLaunch.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                startPrepareFlow(false, true, false);
+                if (generationWarningAccepted || !shouldWarnBeforeLaunch()) {
+                    startPrepareFlow(false, true, false);
+                    return;
+                }
+                new AlertDialog.Builder(BppLauncherActivity.this)
+                    .setTitle("请留在游戏画面")
+                    .setMessage(launchWarningMessage())
+                    .setPositiveButton("知道了，开始", (dialog, which) -> {
+                        generationWarningAccepted = true;
+                        startPrepareFlow(false, true, false);
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
             }
         });
         LinearLayout.LayoutParams launchLp = new LinearLayout.LayoutParams(
@@ -295,6 +314,18 @@ public final class BppLauncherActivity extends Activity {
         );
         launchLp.topMargin = dp(16);
         root.addView(btnLaunch, launchLp);
+
+        tvGenerationHint = new TextView(this);
+        tvGenerationHint.setContentDescription("bpp_generation_hint");
+        tvGenerationHint.setTextColor(COLOR_GOLD);
+        tvGenerationHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        tvGenerationHint.setVisibility(View.GONE);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        hintLp.topMargin = dp(8);
+        root.addView(tvGenerationHint, hintLp);
 
         LinearLayout secondaryRow = new LinearLayout(this);
         secondaryRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -756,19 +787,21 @@ public final class BppLauncherActivity extends Activity {
             );
             recordActiveModpackSelection(packageName, BppBundledModpackInstaller.MODPACK_NAME);
             markCrashDiagnosticsLaunch(packageName);
+            patchGameLoggingConfig(packageName);
             BppDiagnosticSessionLog.noteLaunch(
                 this,
                 BppDiagnosticBundle.nowIso()
                     + " event=launch"
                     + " target=" + packageName
                     + " pid=" + Process.myPid()
-                    + " gamePid=" + findRunningGameProcessPid()
+                    + " gamePid=pending"
                     + " ogLibUnity=" + useOriginalLibUnity
                     + " blockUnityKill=" + blockUnityKill
                     + " screenDim=" + screenDim
                     + " floatingLog=" + floatingLog
                     + " modpack=" + BppBundledModpackInstaller.MODPACK_NAME
             );
+            scheduleGamePidNotes();
 
             final Class<?> bootstrapClass = Class.forName("com.bepinex.android.BootstrapActivity");
             runOnUiThread(new Runnable() {
@@ -883,6 +916,119 @@ public final class BppLauncherActivity extends Activity {
             return pm.getPackageInfo(packageName, 0);
         } catch (Exception ex) {
             return null;
+        }
+    }
+
+    private boolean shouldWarnBeforeLaunch() {
+        return interopDllCount() <= 0 || killedDuringGeneration();
+    }
+
+    private String launchWarningMessage() {
+        if (killedDuringGeneration()) {
+            return "上次生成模组文件时游戏被系统杀掉了（内存不足）。当时游戏不在前台，系统会优先回收它。"
+                + "请重新启动后留在灰色画面，不要切回启动器或桌面，直到进入游戏。灰色画面不是卡死。";
+        }
+        return BppDiagnosticBundle.FIRST_RUN_OVERLAY_TEXT
+            + "。进入游戏后画面会是灰色，这是在生成模组文件，不是卡死。请一直留在游戏里。";
+    }
+
+    private void refreshGenerationHint() {
+        if (tvGenerationHint == null) return;
+        try {
+            if (killedDuringGeneration()) {
+                tvGenerationHint.setVisibility(View.VISIBLE);
+                tvGenerationHint.setText("上次生成模组文件时，游戏因为切到后台被系统杀掉了（内存不足）。"
+                    + "请再启动一次，并停留在灰色画面直到进入游戏。");
+                return;
+            }
+            if (interopDllCount() <= 0) {
+                tvGenerationHint.setVisibility(View.VISIBLE);
+                tvGenerationHint.setText(BppDiagnosticBundle.FIRST_RUN_OVERLAY_TEXT
+                    + "。灰色画面是正常的，请不要切走。");
+                return;
+            }
+            tvGenerationHint.setVisibility(View.GONE);
+        } catch (Throwable ignored) {
+            tvGenerationHint.setVisibility(View.GONE);
+        }
+    }
+
+    private boolean killedDuringGeneration() {
+        String state = readGenerationState();
+        if (state.indexOf("stage=ready") >= 0) return false;
+        boolean inProgress = state.indexOf("stage=cpp2il") >= 0
+            || state.indexOf("stage=interop") >= 0
+            || state.indexOf("stage=unity-libs") >= 0
+            || state.indexOf("stage=starting") >= 0
+            || state.indexOf("stage=plugins") >= 0;
+        if (!inProgress) return false;
+        String exit = BppDiagnosticExporter.latestGameExitNote(this);
+        return exit.indexOf("reasonName=LOW_MEMORY") >= 0 || exit.indexOf("reason=3") >= 0;
+    }
+
+    private String readGenerationState() {
+        try {
+            File file = new File(BppDiagnosticSessionLog.diagnosticsDir(this), "generation-state.txt");
+            if (!file.isFile() || file.length() > 8192) return "";
+            byte[] data = java.nio.file.Files.readAllBytes(file.toPath());
+            return new String(data, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private int interopDllCount() {
+        BppDiagnosticBundle.DirStat stat = BppDiagnosticBundle.summarizeTree(
+            new File(resolveGameRootDir(BppBundledModpackInstaller.TARGET_PACKAGE), "BepInEx/interop"),
+            ".dll",
+            2
+        );
+        return stat.files;
+    }
+
+    private void patchGameLoggingConfig(String packageName) {
+        File root = resolveGameRootDir(packageName);
+        patchCfg(new File(root, "BepInEx/config/BepInEx.cfg"));
+        patchCfg(new File(root, "modpacks/bpp/config/BepInEx.cfg"));
+    }
+
+    private void patchCfg(File cfg) {
+        try {
+            if (cfg == null || !cfg.isFile()) return;
+            byte[] raw = java.nio.file.Files.readAllBytes(cfg.toPath());
+            if (raw.length > 1024 * 1024) return;
+            String text = new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+            String updated = BppDiagnosticBundle.enableDiagnosticLogging(text);
+            if (updated.equals(text)) return;
+            File tmp = new File(cfg.getAbsolutePath() + ".tmp");
+            java.nio.file.Files.write(tmp.toPath(), updated.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            if (!tmp.renameTo(cfg)) {
+                java.nio.file.Files.write(cfg.toPath(), updated.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                tmp.delete();
+            }
+            BppDiagnosticSessionLog.note(this, "prepare-results.log",
+                BppDiagnosticBundle.nowIso() + " outcome=logging-config detail=" + cfg.getName());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void scheduleGamePidNotes() {
+        final int[] delays = new int[] {1000, 2000, 4000, 8000, 15000, 30000, 60000};
+        for (int i = 0; i < delays.length; i++) {
+            final int delay = delays[i];
+            mainHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    int gamePid = findRunningGameProcessPid();
+                    BppDiagnosticSessionLog.note(
+                        BppLauncherActivity.this,
+                        "launch-attempts.log",
+                        BppDiagnosticBundle.nowIso()
+                            + " event=game-pid gamePid=" + gamePid
+                            + " afterMs=" + delay
+                    );
+                }
+            }, delay);
         }
     }
 

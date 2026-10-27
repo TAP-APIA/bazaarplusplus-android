@@ -8,7 +8,7 @@ param(
     [string]$SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
     [string]$KeyStore = '',
     [string]$KeyAlias = 'androiddebugkey',
-    [int]$VersionCode = 39,
+    [int]$VersionCode = 40,
     [string]$AndroidSdkRoot = $env:ANDROID_SDK_ROOT,
     [switch]$UnsignedOnly
 )
@@ -62,7 +62,7 @@ $productVersion = if (Test-Path -LiteralPath $versionFile) {
 }
 # Monotonic Android versioning for the self-deploying launcher. Bump this for every published APK;
 # install -r refuses a lower versionCode and users must not uninstall (that wipes local history).
-# android-v6.0.0-preview.38 shipped versionCode 38, so the next package is 39 / 6.0.0-preview.39.
+# android-v6.0.0-preview.39 shipped versionCode 39, so the next package is 40 / 6.0.0-preview.40.
 $versionCode = $VersionCode
 $versionName = "$productVersion-preview.$versionCode"
 
@@ -127,7 +127,8 @@ try {
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticBundle.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticExporter.java') `
-        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticSessionLog.java')
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppDiagnosticSessionLog.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameProcess.java')
     if ($LASTEXITCODE -ne 0) { throw 'BppLauncherActivity compilation failed' }
 
     $compiledClassFiles = @(Get-ChildItem -LiteralPath $appClasses -Recurse -Filter *.class | Select-Object -ExpandProperty FullName)

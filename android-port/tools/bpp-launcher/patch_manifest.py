@@ -10,6 +10,8 @@ TYPE_STRING = 0x03
 BPP_ACTIVITY_NAME = "com.bepinex.android.bpp.BppLauncherActivity"
 ORIG_MAIN_ACTIVITY_NAME = "com.bepinex.android.MainActivity"
 BPP_APP_LABEL = "BPP Android"
+GAME_PROCESS_PROVIDER = "com.bepinex.android.bpp.BppGameProcess"
+GAME_PROCESS_AUTHORITY = "com.bepinex.android.bpp.game-process"
 UNITY_WINDOW_METADATA = ("unity.launch-fullscreen", "unity.render-outside-safearea")
 
 
@@ -326,7 +328,7 @@ def patch_manifest_bytes(
     body = b"".join(out_chunks)
     total_size = 8 + len(body)
     header = struct.pack("<II", 0x00080003, total_size)
-    return patch_unity_window_metadata(header + body)
+    return ensure_game_process_provider(patch_unity_window_metadata(header + body))
 
 
 def _update_bpp_manifest_version(axml: bytes, version_code: int | None, version_name: str | None) -> bytes:
@@ -363,7 +365,112 @@ def _update_bpp_manifest_version(axml: bytes, version_code: int | None, version_
     if bpp_activities != 1 or not version_updated:
         raise ValueError("Expected exactly one BppLauncherActivity and a manifest")
     body = b"".join(chunks)
-    return patch_unity_window_metadata(struct.pack("<HHI", 3, 8, len(body) + 8) + body)
+    return ensure_game_process_provider(
+        patch_unity_window_metadata(struct.pack("<HHI", 3, 8, len(body) + 8) + body)
+    )
+
+
+def _has_provider(axml: bytes, class_name: str) -> bool:
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    strings = _parse_string_pool(axml[8 : 8 + pool_size])
+    offset = 8 + pool_size
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            break
+        if kind == RES_XML_START_ELEMENT_TYPE:
+            element, attrs = _get_start_element_info(axml[offset : offset + size], strings)
+            if element == "provider" and attrs.get("name") == class_name:
+                return True
+        offset += size
+    return False
+
+
+def _provider_element(strings: list[str]) -> tuple[bytes, bytes]:
+    ns = strings.index("http://schemas.android.com/apk/res/android")
+    name_i = strings.index("name")
+    exported_i = strings.index("exported")
+    authorities_i = strings.index("authorities")
+    process_i = strings.index("process")
+    provider_i = strings.index("provider")
+    class_i = strings.index(GAME_PROCESS_PROVIDER)
+    authority_i = strings.index(GAME_PROCESS_AUTHORITY)
+    game_i = strings.index(":game")
+
+    def attr(name_idx: int, raw: int, typ: int, data: int) -> bytes:
+        return struct.pack("<IIIHBBI", ns, name_idx, raw, 8, 0, typ, data)
+
+    attrs = b"".join([
+        attr(name_i, class_i, TYPE_STRING, class_i),
+        attr(exported_i, 0xFFFFFFFF, 0x12, 0),
+        attr(authorities_i, authority_i, TYPE_STRING, authority_i),
+        attr(process_i, game_i, TYPE_STRING, game_i),
+    ])
+    start = struct.pack(
+        "<HHI4I6H",
+        RES_XML_START_ELEMENT_TYPE,
+        16,
+        36 + len(attrs),
+        0,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        provider_i,
+        20,
+        20,
+        4,
+        0,
+        0,
+        0,
+    ) + attrs
+    end = struct.pack(
+        "<HHI4I",
+        RES_XML_END_ELEMENT_TYPE,
+        16,
+        24,
+        0,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        provider_i,
+    )
+    return start, end
+
+
+def ensure_game_process_provider(axml: bytes) -> bytes:
+    """Declare the :game diagnostics provider. Repacking an already patched manifest must keep it."""
+    if _has_provider(axml, GAME_PROCESS_PROVIDER):
+        return axml
+    pool_size = struct.unpack_from("<I", axml, 12)[0]
+    existing = _parse_string_pool(axml[8 : 8 + pool_size])
+    extra = [
+        value
+        for value in (GAME_PROCESS_PROVIDER, GAME_PROCESS_AUTHORITY, ":game", "provider")
+        if value not in existing
+    ]
+    pool, strings = _rebuild_string_pool_with_appended(axml[8 : 8 + pool_size], extra)
+    for required in ("name", "exported", "authorities", "process", "provider", ":game"):
+        if required not in strings:
+            raise ValueError(f"Manifest is missing the {required} string needed for the game provider")
+    start, end = _provider_element(strings)
+    chunks = [pool]
+    offset = 8 + pool_size
+    inserted = False
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            raise ValueError("Corrupt AXML chunk while inserting the game provider")
+        chunk = axml[offset : offset + size]
+        chunks.append(chunk)
+        if not inserted and kind == RES_XML_START_ELEMENT_TYPE:
+            element, _attrs = _get_start_element_info(chunk, strings)
+            if element == "application":
+                chunks.append(start)
+                chunks.append(end)
+                inserted = True
+        offset += size
+    if not inserted:
+        raise ValueError("application element not found while inserting the game provider")
+    body = b"".join(chunks)
+    return struct.pack("<HHI", 3, 8, len(body) + 8) + body
 
 
 def main() -> int:

@@ -22,6 +22,9 @@ public final class BppDiagnosticBundleTests {
         testAppendCappedAndCaptureProcess();
         testTreeListsPlugins();
         testReadmeExplainsTheZip();
+        testGenerationStageAndLoggingConfig();
+        testExitReasonNamesAndDirectoryListing();
+        testPreferenceProtoKeys();
         System.out.println("PASS: all BppDiagnosticBundle tests succeeded.");
     }
 
@@ -158,10 +161,16 @@ public final class BppDiagnosticBundleTests {
 
     private static void testLogcatCommandsDoNotClear() {
         List<String> rolling = BppDiagnosticBundle.rollingLogcatCommand(new File("/data/bpp-logcat"));
-        assertTrue(rolling.contains("-f"), "rolling logcat must write a file");
-        assertTrue(rolling.contains("-r") && rolling.contains("-n"), "rolling logcat must rotate");
+        assertTrue(rolling.contains("-d"), "rolling logcat must exit so stdio flushes");
+        assertTrue(!rolling.contains("-f"), "logcat -f stops at an 8KB stdio buffer");
         assertTrue(rolling.contains("crash"), "crash buffer should be included");
         assertTrue(!BppDiagnosticBundle.commandClearsLogcat(rolling), "rolling command clears the buffer");
+        List<String> filtered = BppDiagnosticBundle.rollingLogcatCommand(22781);
+        assertTrue(filtered.contains("--pid=22781"), filtered.toString());
+        assertTrue("line-c\n".equals(BppDiagnosticBundle.suffixAfterMarker("line-a\nline-b\nline-c\n", "line-b")),
+            "suffix after marker");
+        assertTrue(BppDiagnosticBundle.suffixAfterMarker("other\n", "line-b").startsWith("[buffer-rotated]"),
+            "rotated buffer should be kept");
         List<String> dump = BppDiagnosticBundle.dumpLogcatCommand("main");
         assertTrue(dump.contains("-d"), "dump must be non-blocking");
         assertTrue(!BppDiagnosticBundle.commandClearsLogcat(dump), "dump command clears the buffer");
@@ -206,11 +215,95 @@ public final class BppDiagnosticBundleTests {
         String readme = BppDiagnosticBundle.readme("2026-10-27T00:00:00Z", "6.0.0-preview.39", "com.bepinex.android");
         String[] required = new String[] {
             "manifest.txt", "device/", "packages/", "deploy/", "launch/", "logcat/", "crashes/", "state/",
-            "LogOutput", "libil2cpp", "灰屏", "下载", "keystore", "getHistoricalProcessExitReasons"
+            "LogOutput", "libil2cpp", "灰屏", "下载", "keystore", "getHistoricalProcessExitReasons",
+            "game-heartbeat"
         };
         for (int i = 0; i < required.length; i++) {
             assertTrue(readme.contains(required[i]), "readme missing " + required[i]);
         }
+    }
+
+    private static void testGenerationStageAndLoggingConfig() throws Exception {
+        BppDiagnosticBundle.GenerationProbe probe = new BppDiagnosticBundle.GenerationProbe();
+        assertTrue("starting".equals(BppDiagnosticBundle.generationStageId(probe)), "empty probe");
+        probe.unityZipBytes = 1000;
+        assertTrue("unity-libs".equals(BppDiagnosticBundle.generationStageId(probe)), "zip only");
+        probe.unityLibFiles = 40;
+        assertTrue("cpp2il".equals(BppDiagnosticBundle.generationStageId(probe)), "libs without interop");
+        assertTrue(BppDiagnosticBundle.generationPercent(probe, 0) < 0, "cpp2il percent must stay unknown");
+        assertTrue(BppDiagnosticBundle.generationStageLabel("cpp2il").contains("Cpp2IL"), "stage label");
+        probe.interopFiles = 12;
+        probe.interopBytes = 4096;
+        assertTrue("interop".equals(BppDiagnosticBundle.generationStageId(probe)), "writing interop");
+        probe.interopFilesAtStart = 12;
+        probe.logIsNew = true;
+        probe.logOutputBytes = 80;
+        assertTrue("plugins".equals(BppDiagnosticBundle.generationStageId(probe)), "plugins after a fresh log");
+        String cfg = "[Logging]\nUnityLogListening = false\n\n[Logging.Disk]\nWriteUnityLog = false\nInstantFlushing = false\n";
+        String enabled = BppDiagnosticBundle.enableDiagnosticLogging(cfg);
+        assertTrue(enabled.contains("UnityLogListening = true"), enabled);
+        assertTrue(enabled.contains("WriteUnityLog = true"), enabled);
+        assertTrue(enabled.contains("InstantFlushing = true"), enabled);
+        assertTrue(enabled.equals(BppDiagnosticBundle.enableDiagnosticLogging(enabled)), "patch not idempotent");
+        File root = Files.createTempDirectory("bpp-diag-logs").toFile();
+        write(new File(root, "BepInEx/logs/LogOutput.log"), "log\n");
+        write(new File(root, "BepInEx/plugins/nested.log"), "inside-plugin\n");
+        write(new File(root, "BepInEx/plugins/skip.dll"), "dll");
+        List<File> logs = BppDiagnosticBundle.findLogFiles(root, 20);
+        boolean sawNested = false;
+        for (int i = 0; i < logs.size(); i++) {
+            if (logs.get(i).getName().equals("nested.log")) sawNested = true;
+        }
+        assertTrue(sawNested, "log inside plugins was skipped");
+        String empty = BppDiagnosticBundle.describeDirectory(new File(root, "BepInEx/interop"), 10);
+        assertTrue(empty.contains("exists=false"), empty);
+        File logsDir = new File(root, "BepInEx/logs");
+        String listed = BppDiagnosticBundle.describeDirectory(logsDir, 10);
+        assertTrue(listed.contains("LogOutput.log"), listed);
+        assertTrue(listed.contains("children=1"), listed);
+    }
+
+    private static void testExitReasonNamesAndDirectoryListing() {
+        assertTrue("LOW_MEMORY".equals(BppDiagnosticBundle.exitReasonName(3)), "reason 3");
+        assertTrue("CACHED".equals(BppDiagnosticBundle.importanceName(400)), "importance 400");
+        assertTrue(BppDiagnosticBundle.exitSubReasonName(6).equals("MEMORY_PRESSURE"), "subreason");
+        assertTrue(BppDiagnosticBundle.exitSubReasonName(-1).equals("unavailable"), "missing subreason");
+        assertTrue(BppDiagnosticBundle.FIRST_RUN_OVERLAY_TEXT.contains("不要切走"), "overlay copy");
+    }
+
+    private static void testPreferenceProtoKeys() {
+        byte[] value = protoBytes(new byte[][] {
+            new byte[] {0x2a, 0x04}, "dark".getBytes(StandardCharsets.UTF_8)
+        });
+        byte[] entry = protoBytes(new byte[][] {
+            new byte[] {0x0a, 0x05}, "theme".getBytes(StandardCharsets.UTF_8),
+            new byte[] {0x12, (byte) value.length}, value
+        });
+        byte[] tokenValue = protoBytes(new byte[][] { new byte[] {0x08, 0x01} });
+        byte[] tokenEntry = protoBytes(new byte[][] {
+            new byte[] {0x0a, 0x09}, "api_token".getBytes(StandardCharsets.UTF_8),
+            new byte[] {0x12, (byte) tokenValue.length}, tokenValue
+        });
+        byte[] message = protoBytes(new byte[][] {
+            new byte[] {0x0a, (byte) entry.length}, entry,
+            new byte[] {0x0a, (byte) tokenEntry.length}, tokenEntry
+        });
+        String decoded = BppDiagnosticBundle.decodePreferenceProto(message);
+        assertTrue(decoded.contains("theme=dark"), decoded);
+        assertTrue(decoded.contains("api_token=[redacted]"), decoded);
+        assertTrue(!decoded.contains("true"), decoded);
+    }
+
+    private static byte[] protoBytes(byte[][] parts) {
+        int size = 0;
+        for (int i = 0; i < parts.length; i++) size += parts[i].length;
+        byte[] out = new byte[size];
+        int at = 0;
+        for (int i = 0; i < parts.length; i++) {
+            System.arraycopy(parts[i], 0, out, at, parts[i].length);
+            at += parts[i].length;
+        }
+        return out;
     }
 
     private static void write(File file, String text) throws Exception {
