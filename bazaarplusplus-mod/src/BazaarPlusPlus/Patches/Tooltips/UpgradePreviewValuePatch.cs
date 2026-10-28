@@ -13,6 +13,12 @@ namespace BazaarPlusPlus.Patches.Tooltips;
 [HarmonyPatch(typeof(CardTooltipData), "RenderTooltip", [typeof(TooltipBuilder)])]
 internal static class UpgradePreviewTooltipRenderScopePatch
 {
+#if BPP_ANDROID
+    // Only feeds UpgradePreviewValuePatch, which Android skips.
+    [HarmonyPrepare]
+    private static bool Prepare() => false;
+#endif
+
     [HarmonyPrefix]
     private static void Prefix() => UpgradePreviewValueRegistry.BeginTooltipRender();
 
@@ -23,6 +29,14 @@ internal static class UpgradePreviewTooltipRenderScopePatch
 [HarmonyPatch(typeof(TooltipComponentAura), nameof(TooltipComponentAura.Resolve))]
 internal static class UpgradePreviewAuraValueContextPatch
 {
+#if BPP_ANDROID
+    // Only feeds UpgradePreviewValuePatch, which Android skips. Resolve returns a
+    // by-value Nullable<float>, and routing it through the ARM64 detour renders aura
+    // tooltip values as 0.
+    [HarmonyPrepare]
+    private static bool Prepare() => false;
+#endif
+
     [HarmonyPostfix]
     private static void Postfix(TooltipComponentAura __instance)
     {
