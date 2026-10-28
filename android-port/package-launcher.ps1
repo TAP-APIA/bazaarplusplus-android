@@ -8,7 +8,7 @@ param(
     [string]$SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
     [string]$KeyStore = '',
     [string]$KeyAlias = 'androiddebugkey',
-    [int]$VersionCode = 43,
+    [int]$VersionCode = 44,
     [string]$AndroidSdkRoot = $env:ANDROID_SDK_ROOT,
     [switch]$UnsignedOnly
 )
@@ -62,7 +62,7 @@ $productVersion = if (Test-Path -LiteralPath $versionFile) {
 }
 # Monotonic Android versioning for the self-deploying launcher. Bump this for every published APK;
 # install -r refuses a lower versionCode and users must not uninstall (that wipes local history).
-# preview.42 shipped 42, next 43 / 6.0.0-preview.43.
+# preview.43 shipped 43, next 44 / 6.0.0-preview.44.
 $versionCode = $VersionCode
 $versionName = "$productVersion-preview.$versionCode"
 
@@ -105,6 +105,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'BppDiagnosticBundle test compilation failed' }
     & $java -cp $testClasses com.bepinex.android.bpp.BppDiagnosticBundleTests
     if ($LASTEXITCODE -ne 0) { throw 'BppDiagnosticBundle unit tests failed' }
+
+    & $javac -encoding UTF-8 --release 17 -d $testClasses `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGithubFeedback.java') `
+        (Join-Path $launcherToolsDir 'test/com/bepinex/android/bpp/BppGithubFeedbackTests.java')
+    if ($LASTEXITCODE -ne 0) { throw 'BppGithubFeedback test compilation failed' }
+    & $java -cp $testClasses com.bepinex.android.bpp.BppGithubFeedbackTests
+    if ($LASTEXITCODE -ne 0) { throw 'BppGithubFeedback unit tests failed' }
 
     & python (Join-Path $launcherToolsDir 'test_patch_manifest.py') ([IO.Path]::GetFullPath($SourceApk))
     if ($LASTEXITCODE -ne 0) { throw 'AndroidManifest patcher tests failed' }
@@ -156,6 +163,7 @@ try {
         $generatedBuildInfo `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBundledModpackInstaller.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGithubFeedback.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherUpdateChecker.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppApkDownload.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBackBridge.java') `

@@ -38,6 +38,9 @@
   打开启动器就会开始滚动记录 logcat；灰屏或闪退后回到本页再导出，即可带上这次启动。
   读不到的路径记在 `manifest.txt`，不会让启动器崩溃。不含对局历史数据库、录像和签名私钥。
   不新增权限：logcat 只能读到本应用自己的缓冲区，写入「下载」走 Android 10 及以上的 MediaStore。
+- **去 GitHub 反馈**：先按同样流程导出诊断 zip 到系统「下载」，然后打开本仓库的 GitHub 新建 issue 页面，
+  自动填入中文模板（设备、启动器/内置版本、ABI、诊断包文件名）。需要你手动把「下载」文件夹里的 zip
+  拖到页面正文上传；应用不会自动上传任何文件，标题、正文和 URL 只使用 zip 文件名，不写绝对路径、IP 或令牌。
 - **检查启动器更新**：一体化首页每次新建时自动检查本仓库的 GitHub Release，也可手动重试。
   包含 `android-v` 标签的预览版，仅提示带有已上传 `BepInExLauncher-bpp-android.apk` 的新版；
   按版本数字比较，不按发布日期或字符串排序。检查最近 100 个 Release，草稿和无安装包版本忽略。
@@ -136,8 +139,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launc
 - `-ModpackZip` 可指定现成 ZIP，跳过重新打包。
 - `-KeyStore` / `-KeyAlias` 可改用正式签名；默认使用
   `%USERPROFILE%\.android\debug.keystore` 的 `androiddebugkey`。
-- `-VersionCode` 每次发布必须递增；默认 `43`，版本名 `6.0.0-preview.43`
-  （preview.42 是 `42`，preview.41 是 `41`）。默认输出
+- `-VersionCode` 每次发布必须递增；默认 `44`，版本名 `6.0.0-preview.44`
+  （preview.43 是 `43`，preview.42 是 `42`）。默认输出
   `dist/BepInExLauncher-bpp-android.apk`。
 - `-UnsignedOnly` 只生成对齐后的未签名 APK。
 
