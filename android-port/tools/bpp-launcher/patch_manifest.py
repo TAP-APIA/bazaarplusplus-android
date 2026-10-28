@@ -543,7 +543,33 @@ def _install_game_process_hooks(axml: bytes) -> bytes:
     axml = ensure_generation_service(
         ensure_game_application(ensure_game_process_provider(patch_unity_window_metadata(axml)))
     )
-    return sort_element_attributes(axml)
+    return sort_element_attributes(ensure_install_permission(axml))
+
+
+def ensure_install_permission(axml: bytes) -> bytes:
+    """Allow the explicit system installer flow; Android still requires user consent."""
+    permission = "android.permission.REQUEST_INSTALL_PACKAGES"
+    if _has_component(axml, "uses-permission", permission):
+        return axml
+    axml, strings = _with_extra_strings(axml, ["uses-permission", permission])
+    resource_map = _read_resource_map(axml)
+    index = strings.index(permission)
+    attribute = _android_attr(strings, resource_map, "name", index, TYPE_STRING, index)
+    element = strings.index("uses-permission")
+    addition = _xml_start(element, attribute, 1) + _xml_end(element)
+    offset = 8
+    while offset < len(axml):
+        kind, _, size = struct.unpack_from("<HHI", axml, offset)
+        if size < 8 or offset + size > len(axml):
+            raise ValueError("Corrupt AXML while adding install permission")
+        if kind == RES_XML_START_ELEMENT_TYPE:
+            name, _ = _get_start_element_info(axml[offset:offset + size], strings)
+            if name == "manifest":
+                end = offset + size
+                body = axml[8:end] + addition + axml[end:]
+                return struct.pack("<HHI", 3, 8, len(body) + 8) + body
+        offset += size
+    raise ValueError("manifest element not found while adding install permission")
 
 
 def _with_extra_strings(axml: bytes, extra: list[str]) -> tuple[bytes, list[str]]:

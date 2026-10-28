@@ -6,6 +6,8 @@
 
 <https://github.com/TAP-APIA/bazaarplusplus-android/releases>
 
+游戏窗口允许左右两种横屏方向随设备转动切换；BPP 启动器首页保持自身方向策略。
+
 ## 安装与更新
 
 1. 下载 `BepInExLauncher-bpp-android.apk`。
@@ -42,11 +44,14 @@
 - **检查启动器更新**：一体化首页每次新建时自动检查本仓库的 GitHub Release，也可手动重试。
   包含 `android-v` 标签的预览版，仅提示带有已上传 `BepInExLauncher-bpp-android.apk` 的新版；
   按版本数字比较，不按发布日期或字符串排序。检查最近 100 个 Release，草稿和无安装包版本忽略。
-  发现新版后可打开对应 GitHub 下载页，自行下载并覆盖安装；不会静默安装或替换上游资源。
+  发现新版后可在 App 内下载 APK，并显示进度；下载由系统服务继续执行，退出首页或重启启动器后仍可查看。
+  完成后点击安装，首次需在系统设置中允许 BPP 安装应用，返回后再次点击安装；系统安装界面仍需用户确认。
+  安装前核对 APK 大小、包名和版本，签名兼容性由系统安装器验证。失败可重试或打开 GitHub 下载页；不会静默安装或替换上游资源。
   网络失败或 GitHub 限流会显示检查失败，不会阻止启动游戏，也不会误报为“已是最新版”。
   此功能需先安装包含更新检查的新 APK，已发布的 preview.37 不会自动获得该能力。
 
 更新检查回归测试：`python android-port/tools/bpp-launcher/test_launcher_update.py`。
+下载状态与安装包校验回归测试：`python android-port/tools/bpp-launcher/test_apk_download.py`。
 设置 `JAVA_HOME` 指向 JDK 17+；首次运行下载并校验固定 SHA-256 的 `org.json` JVM 测试依赖，
 不将此依赖打入 APK（Android 自带 JSON 实现）。加 `--live` 可另做真实 GitHub 连通性检查。
 

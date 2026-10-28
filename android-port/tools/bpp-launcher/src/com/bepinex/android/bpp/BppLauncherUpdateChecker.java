@@ -27,11 +27,15 @@ public final class BppLauncherUpdateChecker {
     public static final class Update {
         public final String version;
         public final String releaseUrl;
+        public final String apkUrl;
+        public final long apkSize;
 
-        private Update(String tag) {
+        private Update(String tag, long size) {
             version = tag.substring("android-v".length());
             // Construct from a validated tag, never navigate to an arbitrary URL in release text.
             releaseUrl = RELEASES_URL + "/tag/" + tag;
+            apkUrl = RELEASES_URL + "/download/" + tag + "/" + APK_NAME;
+            apkSize = size;
         }
     }
 
@@ -68,7 +72,7 @@ public final class BppLauncherUpdateChecker {
             if (compareVersions(tag, currentVersion) <= 0) continue;
             JSONArray assets = release.optJSONArray("assets");
             if (assets == null) continue;
-            boolean hasApk = false;
+            long apkSize = 0;
             for (int j = 0; j < assets.length(); j++) {
                 JSONObject asset = assets.getJSONObject(j);
                 String expectedUrl = RELEASES_URL + "/download/" + tag + "/" + APK_NAME;
@@ -76,12 +80,12 @@ public final class BppLauncherUpdateChecker {
                     && "uploaded".equals(asset.optString("state"))
                     && asset.optLong("size", 0) > 0
                     && expectedUrl.equals(asset.optString("browser_download_url"))) {
-                    hasApk = true;
+                    apkSize = asset.optLong("size", 0);
                     break;
                 }
             }
-            if (hasApk && (newest == null || compareVersions(tag, newest.version) > 0)) {
-                newest = new Update(tag);
+            if (apkSize > 0 && (newest == null || compareVersions(tag, newest.version) > 0)) {
+                newest = new Update(tag, apkSize);
             }
         }
         return newest;
