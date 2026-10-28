@@ -9,6 +9,7 @@ import unittest
 
 
 STUBS = {
+    "android/content/pm/ActivityInfo.java": "package android.content.pm; public class ActivityInfo { public static final int SCREEN_ORIENTATION_SENSOR_LANDSCAPE=6; }",
     "android/R.java": "package android; public class R { public static class id { public static int content=1; } }",
     "android/os/Build.java": "package android.os; public class Build { public static class VERSION { public static int SDK_INT=35; } }",
     "android/os/Looper.java": "package android.os; public class Looper { public static Looper getMainLooper(){return new Looper();} }",
@@ -25,6 +26,9 @@ STUBS = {
     "android/app/Activity.java": """package android.app; public class Activity {
         public final android.view.Window window=new android.view.Window();
         public boolean focused=true,finishing,destroyed;
+        public int orientation=0,orientationWrites;
+        public int getRequestedOrientation(){return orientation;}
+        public void setRequestedOrientation(int value){orientation=value;orientationWrites++;}
         public boolean isFinishing(){return finishing;} public boolean isDestroyed(){return destroyed;}
         public boolean hasWindowFocus(){return focused;}
         public android.view.Window getWindow(){return window;}
@@ -96,6 +100,10 @@ STUBS = {
             BppGameWindow.apply(game);
             check(d.controller.hideCalls==0,"Window mutated before UI queue dispatch");
             android.os.Handler.drain();
+            check(game.orientation==6,"Fixed landscape was not changed to both landscape sides");
+            apply(game); check(game.orientationWrites==1,"Redundant orientation request");
+            game.orientation=8; apply(game);
+            check(game.orientation==6 && game.orientationWrites==2,"Unity fixed-orientation override not repaired");
             check(!w.fits && w.attributes.fitTypes==0,"Window must ignore visible bar insets");
             check(d.controller.behavior==2 && d.controller.hideCalls==1,"Initial sticky immersion");
             int immersive=d.visibility;
@@ -109,12 +117,13 @@ STUBS = {
             check(d.content.insetRequests==0,"Heartbeat redispatched child insets");
             game.focused=false; d.observer.focus(false); d.visibility=0;
             apply(game); check(d.controller.hideCalls==1,"Unfocused policy repair stole shade");
-            game.focused=true; d.observer.focus(true);
+            game.orientation=0; game.focused=true; d.observer.focus(true);
             check(d.controller.hideCalls==1,"Focus repair ran inside Unity dispatch");
             // Unity's callback in the same dispatch restores decor fitting and requests bars,
             // but can leave every legacy immersive bit set (the observed v33 failure).
             w.fits=true; d.visibility=immersive; d.controller.transientVisible=true;
             android.os.Handler.drain();
+            check(game.orientation==6,"Focus did not restore both landscape sides");
             check(!w.fits && !d.controller.transientVisible && d.controller.hideCalls==2,"Deferred focus repair missed controller-only reset");
             check(d.insetRequests==0,"Focus return redispatched insets");
             d.visibility=0; // Unity rewrites requested flags after its player finishes loading.
@@ -134,6 +143,7 @@ STUBS = {
             check(replacement.window.decor.insetListener==null,"Reset leaked root insets listener");
             Activity launcher=new com.bepinex.android.bpp.BppLauncherActivity(); apply(launcher);
             Activity subclass=new LauncherSubclass(); apply(subclass);
+            check(launcher.orientationWrites==0 && subclass.orientationWrites==0,"Launcher orientation changed");
             check(launcher.window.decor.controller.hideCalls==0 && subclass.window.decor.controller.hideCalls==0
                     && launcher.window.fits && subclass.window.fits,"Launcher window was modified");
             check(replacement.window.decor.controller.hideCalls==1,"Launcher changed game window");

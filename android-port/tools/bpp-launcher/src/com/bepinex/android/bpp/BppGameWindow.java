@@ -1,6 +1,7 @@
 package com.bepinex.android.bpp;
 
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -44,6 +45,7 @@ public final class BppGameWindow {
                     if (generation != token) return;
                     try {
                         if (!isGameTarget(activity)) return;
+                        applyOrientation(activity);
                         ensureDiagnosticCapture(activity);
                         Window window = activity.getWindow();
                         if (window == null) return;
@@ -138,6 +140,7 @@ public final class BppGameWindow {
                 try {
                     // Notification shade/app switches restore immersion on return. A transient
                     // swipe does not lose focus: Android alone times out those overlay bars.
+                    applyOrientation(target);
                     applyWindow(target.getWindow(), view);
                     if (Build.VERSION.SDK_INT < 30) view.setSystemUiVisibility(IMMERSIVE_FLAGS);
                 } catch (RuntimeException error) {
@@ -170,6 +173,17 @@ public final class BppGameWindow {
         } catch (RuntimeException error) {
             reportFailure("target_identity", error);
             return false;
+        }
+    }
+
+    private static void applyOrientation(Activity activity) {
+        try {
+            // The fused host copies the game's fixed landscape request at launch. Allow both
+            // landscape sides; the existing heartbeat also repairs later Unity overrides.
+            if (activity.getRequestedOrientation() != ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE)
+                activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        } catch (RuntimeException error) {
+            reportFailure("orientation", error);
         }
     }
 

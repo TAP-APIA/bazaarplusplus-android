@@ -96,6 +96,9 @@ public final class BppLauncherActivity extends Activity {
     private boolean resumed;
     private boolean updatePromptShown;
     private BppLauncherUpdateChecker.Update availableUpdate;
+    private BppApkDownload apkDownload;
+    private boolean validatingApk;
+    private final Runnable downloadPoll = this::refreshApkDownload;
 
     private volatile boolean busy;
     private volatile boolean autoLaunchConsumed;
@@ -127,6 +130,7 @@ public final class BppLauncherActivity extends Activity {
             BppDiagnosticSessionLog.ensureCapture(this, "launcher");
         } catch (Throwable ignored) {
         }
+        apkDownload = new BppApkDownload(this);
         setContentView(buildContentView());
     }
 
@@ -134,7 +138,9 @@ public final class BppLauncherActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (apkDownload.alreadyInstalled(installedLauncherVersion())) apkDownload.clear();
         if (!updateChecked) checkLauncherUpdate();
+        refreshApkDownload();
         showLauncherUpdatePrompt();
         clearPendingCrashBanner();
         refreshGenerationHint();
@@ -150,6 +156,7 @@ public final class BppLauncherActivity extends Activity {
     @Override
     protected void onPause() {
         resumed = false;
+        mainHandler.removeCallbacks(downloadPoll);
         super.onPause();
     }
 
@@ -448,11 +455,15 @@ public final class BppLauncherActivity extends Activity {
             COLOR_BUTTON_SECONDARY_BG, COLOR_GOLD_BORDER, COLOR_TEXT_PRIMARY, 13f, false);
         btnCheckUpdate.setOnClickListener(v -> checkLauncherUpdate());
         updateCard.addView(btnCheckUpdate);
-        btnDownloadUpdate = createActionButton("打开 GitHub 下载新版", "bpp_btn_download_update",
+        btnDownloadUpdate = createActionButton("下载新版 APK", "bpp_btn_download_update",
             COLOR_BUTTON_PRIMARY_BG, COLOR_GOLD_BORDER, COLOR_GOLD, 13f, true);
         btnDownloadUpdate.setVisibility(View.GONE);
-        btnDownloadUpdate.setOnClickListener(v -> openLauncherUpdate());
+        btnDownloadUpdate.setOnClickListener(v -> downloadOrInstallUpdate());
         updateCard.addView(btnDownloadUpdate);
+        Button releasePage = createActionButton("GitHub 下载页（备用）", "bpp_btn_release_page",
+            COLOR_BUTTON_SECONDARY_BG, COLOR_GOLD_BORDER, COLOR_TEXT_SECONDARY, 13f, false);
+        releasePage.setOnClickListener(v -> openReleasePage());
+        updateCard.addView(releasePage);
         TextView updateHint = createInfoLine("仅检查本项目启动器（含预览版）；不会自动替换上游资源。覆盖安装，请勿卸载或清除数据。");
         updateCard.addView(updateHint);
         LinearLayout.LayoutParams updateLp = new LinearLayout.LayoutParams(
@@ -499,28 +510,125 @@ public final class BppLauncherActivity extends Activity {
                 tvUpdateInfo.setText("启动器 " + currentVersion + " · " + (failure != null ? failure
                     : result == null ? "未发现更新版本（含预览版）" : "发现新版 " + result.version));
                 showLauncherUpdatePrompt();
+                refreshApkDownload();
             });
         });
     }
 
     private void showLauncherUpdatePrompt() {
-        if (!resumed || isFinishing() || isDestroyed() || availableUpdate == null || updatePromptShown) return;
+        if (!resumed || isFinishing() || isDestroyed() || availableUpdate == null || updatePromptShown || apkDownload.hasDownload()) return;
         updatePromptShown = true;
         new AlertDialog.Builder(this)
             .setTitle("发现启动器新版 " + availableUpdate.version)
             .setMessage("当前版本：" + installedLauncherVersion()
-                + "\n前往本项目 GitHub Release 下载 APK 并覆盖安装。请勿卸载或清除数据，以保留配置与历史记录。")
-            .setPositiveButton("前往下载", (dialog, which) -> openLauncherUpdate())
+                + "\n在 App 内下载 APK，完成后点击安装并按系统提示覆盖升级。请勿卸载或清除数据，以保留配置与历史记录。")
+            .setPositiveButton("下载新版", (dialog, which) -> downloadOrInstallUpdate())
             .setNegativeButton("稍后", null)
             .show();
     }
 
-    private void openLauncherUpdate() {
-        if (availableUpdate == null) return;
+    private void refreshApkDownload() {
+        mainHandler.removeCallbacks(downloadPoll);
+        if (!resumed || isDestroyed() || validatingApk || !apkDownload.hasDownload()) return;
         try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(availableUpdate.releaseUrl)));
-        } catch (Exception ex) {
-            Toast.makeText(this, "无法打开浏览器，请手动访问本项目 GitHub Release", Toast.LENGTH_LONG).show();
+            BppApkDownload.State state = apkDownload.state();
+            tvUpdateInfo.setText(state.message);
+            btnDownloadUpdate.setVisibility(View.VISIBLE);
+            btnDownloadUpdate.setText(state.complete ? "安装已下载的新版" : "正在下载…");
+            btnDownloadUpdate.setEnabled(state.complete);
+            if (!state.complete) mainHandler.postDelayed(downloadPoll, 1000);
+        } catch (Exception error) {
+            apkDownload.clear();
+            btnDownloadUpdate.setEnabled(true);
+            btnDownloadUpdate.setText("重新下载新版 APK");
+            btnDownloadUpdate.setVisibility(availableUpdate == null ? View.GONE : View.VISIBLE);
+            tvUpdateInfo.setText(error.getMessage());
+        }
+    }
+
+    private void downloadOrInstallUpdate() {
+        try {
+            if (!apkDownload.hasDownload()) {
+                if (availableUpdate == null) return;
+                apkDownload.start(availableUpdate);
+                refreshApkDownload();
+                return;
+            }
+            if (!apkDownload.state().complete) return;
+            if (validatingApk) return;
+            validatingApk = true;
+            mainHandler.removeCallbacks(downloadPoll);
+            btnDownloadUpdate.setEnabled(false);
+            tvUpdateInfo.setText("正在校验安装包…");
+            updateWorker.execute(() -> {
+                Uri uri = null;
+                Exception failure = null;
+                try { uri = apkDownload.installationUri(); }
+                catch (Exception error) { failure = error; }
+                final Uri result = uri;
+                final Exception error = failure;
+                runOnUiThread(() -> {
+                    validatingApk = false;
+                    if (isDestroyed() || isFinishing()) return;
+                    refreshApkDownload();
+                    // Returning from the background leaves an explicit install button.
+                    if (!resumed) return;
+                    if (error != null) showApkUpdateError(error);
+                    else launchApkInstaller(result);
+                });
+            });
+        } catch (Exception error) {
+            showApkUpdateError(error);
+        }
+    }
+
+    private void launchApkInstaller(Uri apk) {
+        try {
+            if (!getPackageManager().canRequestPackageInstalls()) {
+                new AlertDialog.Builder(this)
+                    .setTitle("允许安装更新")
+                    .setMessage("请在系统设置中允许 BPP 安装应用，返回后再次点击「安装已下载的新版」。")
+                    .setPositiveButton("打开设置", (dialog, which) -> {
+                        try {
+                            startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:" + getPackageName())));
+                        } catch (Exception error) {
+                            Toast.makeText(this, "无法打开设置，请在系统设置中允许安装未知应用", Toast.LENGTH_LONG).show();
+                        }
+                    }).setNegativeButton("稍后", null).show();
+                return;
+            }
+            Intent install = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(apk, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            install.setClipData(ClipData.newRawUri("BPP update", apk));
+            startActivity(install);
+        } catch (Exception error) {
+            showApkUpdateError(error);
+        }
+    }
+
+    private void showApkUpdateError(Exception error) {
+        logError("Launcher APK update failed", error);
+        new AlertDialog.Builder(this)
+            .setTitle("更新未完成")
+            .setMessage(error.getMessage() + "\n可重新下载，或打开 GitHub 下载页。请勿卸载应用。")
+            .setPositiveButton("重新下载", (dialog, which) -> {
+                apkDownload.clear();
+                btnDownloadUpdate.setText("下载新版 APK");
+                btnDownloadUpdate.setEnabled(true);
+                if (availableUpdate != null) downloadOrInstallUpdate();
+                else checkLauncherUpdate();
+            })
+            .setNeutralButton("GitHub 下载页", (dialog, which) -> openReleasePage()).setNegativeButton("稍后", null).show();
+    }
+
+    private void openReleasePage() {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(availableUpdate == null
+                ? BppLauncherUpdateChecker.RELEASES_URL : availableUpdate.releaseUrl)));
+        } catch (Exception ignored) {
+            Toast.makeText(this, "无法打开浏览器", Toast.LENGTH_LONG).show();
         }
     }
 

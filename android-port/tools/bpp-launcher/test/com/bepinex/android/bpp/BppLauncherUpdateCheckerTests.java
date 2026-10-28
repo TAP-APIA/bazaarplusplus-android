@@ -46,6 +46,9 @@ public final class BppLauncherUpdateCheckerTests {
         assertThat(select("6.0.0-preview.37") == null);
         assertThat(select("6.0.0-preview.37", v38).releaseUrl.equals(
             BppLauncherUpdateChecker.RELEASES_URL + "/tag/android-v6.0.0-preview.38"));
+        assertThat(select("6.0.0-preview.37", v38).apkUrl.equals(
+            BppLauncherUpdateChecker.RELEASES_URL + "/download/android-v6.0.0-preview.38/BepInExLauncher-bpp-android.apk"));
+        assertThat(select("6.0.0-preview.37", v38).apkSize == 100);
         boolean malformedFailed = false;
         try { BppLauncherUpdateChecker.selectUpdate("{broken", "6.0.0-preview.37"); }
         catch (Exception expected) { malformedFailed = true; }
