@@ -312,6 +312,14 @@ def main() -> int:
     assert _collect_activities(stable) == _collect_activities(patched)
     assert _collect_metadata(stable) == _collect_metadata(patched)
 
+    from patch_manifest import ensure_install_permission, _has_component
+    permission = "android.permission.REQUEST_INSTALL_PACKAGES"
+    assert _has_component(again, "uses-permission", permission)
+    assert ensure_install_permission(again) == again, "Permission duplicated on repack"
+    permission_manifest = ensure_install_permission(original)
+    assert _has_component(permission_manifest, "uses-permission", permission)
+    assert ensure_install_permission(permission_manifest) == permission_manifest
+
     print("PASS: AndroidManifest binary patcher tests succeeded.")
     return 0
 
