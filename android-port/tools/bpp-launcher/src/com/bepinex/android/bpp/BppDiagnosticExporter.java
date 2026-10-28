@@ -84,8 +84,9 @@ public final class BppDiagnosticExporter {
         public final long sizeBytes;
         public final String warning;
         public final String error;
+        public final String fileName;
 
-        Saved(boolean ok, Uri shareUri, String displayPath, String sha256, long sizeBytes, String warning, String error) {
+        Saved(boolean ok, Uri shareUri, String displayPath, String sha256, long sizeBytes, String warning, String error, String fileName) {
             this.ok = ok;
             this.shareUri = shareUri;
             this.displayPath = displayPath;
@@ -93,11 +94,12 @@ public final class BppDiagnosticExporter {
             this.sizeBytes = sizeBytes;
             this.warning = warning;
             this.error = error;
+            this.fileName = fileName == null ? "" : fileName;
         }
 
         static Saved failure(Throwable error) {
             String message = error == null ? "unknown" : error.getClass().getSimpleName() + ": " + error.getMessage();
-            return new Saved(false, null, "", "", 0L, null, message);
+            return new Saved(false, null, "", "", 0L, null, message, "");
         }
     }
 
@@ -353,7 +355,7 @@ public final class BppDiagnosticExporter {
             }
         }
         if (share == null) warning.append("没有可用的分享 Uri。\n");
-        return new Saved(true, share, display, hash, zip.length(), warning.length() == 0 ? null : warning.toString(), null);
+        return new Saved(true, share, display, hash, zip.length(), warning.length() == 0 ? null : warning.toString(), null, zipName);
     }
 
     private static Uri insertDownload(Context context, File zip, String zipName, String collection, StringBuilder warning) {

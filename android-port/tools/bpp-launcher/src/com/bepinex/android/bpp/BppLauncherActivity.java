@@ -86,6 +86,7 @@ public final class BppLauncherActivity extends Activity {
     private Button btnCheckUpdate;
     private Button btnDownloadUpdate;
     private Button btnExportDiagnostics;
+    private Button btnGithubFeedback;
     private TextView tvExportInfo;
     private TextView tvGenerationHint;
     private boolean generationWarningAccepted;
@@ -380,6 +381,14 @@ public final class BppLauncherActivity extends Activity {
 
         root.addView(secondaryRow, rowLp);
 
+        LinearLayout diagnosticsRow = new LinearLayout(this);
+        diagnosticsRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams diagnosticsRowLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        diagnosticsRowLp.topMargin = dp(10);
+
         btnExportDiagnostics = createActionButton(
             "导出诊断日志",
             "bpp_btn_export_diagnostics",
@@ -395,12 +404,30 @@ public final class BppLauncherActivity extends Activity {
                 exportDiagnostics();
             }
         });
-        LinearLayout.LayoutParams exportLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(48)
+        LinearLayout.LayoutParams exportBtnLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        exportBtnLp.rightMargin = dp(6);
+        diagnosticsRow.addView(btnExportDiagnostics, exportBtnLp);
+
+        btnGithubFeedback = createActionButton(
+            "去 GitHub 反馈",
+            "bpp_btn_github_feedback",
+            COLOR_BUTTON_SECONDARY_BG,
+            COLOR_GOLD_BORDER,
+            COLOR_TEXT_PRIMARY,
+            15f,
+            true
         );
-        exportLp.topMargin = dp(10);
-        root.addView(btnExportDiagnostics, exportLp);
+        btnGithubFeedback.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                exportDiagnosticsForGithubFeedback();
+            }
+        });
+        LinearLayout.LayoutParams feedbackBtnLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        feedbackBtnLp.leftMargin = dp(6);
+        diagnosticsRow.addView(btnGithubFeedback, feedbackBtnLp);
+
+        root.addView(diagnosticsRow, diagnosticsRowLp);
 
         TextView exportHint = new TextView(this);
         exportHint.setText("灰屏或闪退后回到本页再点。会保存到「下载」并打开分享，包含设备信息与启动日志，不含对局数据库和签名私钥。");
@@ -1258,13 +1285,17 @@ public final class BppLauncherActivity extends Activity {
     }
 
     private void exportDiagnostics() {
+        runDiagnosticExport(false);
+    }
+
+    private void exportDiagnosticsForGithubFeedback() {
+        runDiagnosticExport(true);
+    }
+
+    private void runDiagnosticExport(final boolean forGithubFeedback) {
         if (exportingDiagnostics || isFinishing() || isDestroyed()) return;
         exportingDiagnostics = true;
-        if (btnExportDiagnostics != null) {
-            btnExportDiagnostics.setEnabled(false);
-            btnExportDiagnostics.setAlpha(0.55f);
-            btnExportDiagnostics.setText("正在导出诊断日志…");
-        }
+        setDiagnosticButtonsExporting(true, forGithubFeedback);
         final String displaySnapshot = BppDiagnosticExporter.captureDisplaySnapshot(this);
         final File gameRoot = resolveGameRootDir(BppBundledModpackInstaller.TARGET_PACKAGE);
         final File internalWork = new File(getFilesDir(), "bpp-bundled-installer");
@@ -1277,17 +1308,30 @@ public final class BppLauncherActivity extends Activity {
                     @Override
                     public void run() {
                         exportingDiagnostics = false;
-                        if (btnExportDiagnostics != null) {
-                            btnExportDiagnostics.setEnabled(true);
-                            btnExportDiagnostics.setAlpha(1f);
-                            btnExportDiagnostics.setText("导出诊断日志");
-                        }
+                        setDiagnosticButtonsExporting(false, forGithubFeedback);
                         if (isDestroyed() || isFinishing()) return;
-                        showExportResult(saved);
+                        if (forGithubFeedback) {
+                            showGithubFeedbackResult(saved);
+                        } else {
+                            showExportResult(saved);
+                        }
                     }
                 });
             }
         });
+    }
+
+    private void setDiagnosticButtonsExporting(boolean exporting, boolean forGithubFeedback) {
+        if (btnExportDiagnostics != null) {
+            btnExportDiagnostics.setEnabled(!exporting);
+            btnExportDiagnostics.setAlpha(exporting ? 0.55f : 1f);
+            btnExportDiagnostics.setText(exporting ? "正在导出诊断日志…" : "导出诊断日志");
+        }
+        if (btnGithubFeedback != null) {
+            btnGithubFeedback.setEnabled(!exporting);
+            btnGithubFeedback.setAlpha(exporting ? 0.55f : 1f);
+            btnGithubFeedback.setText(exporting && forGithubFeedback ? "正在准备反馈…" : "去 GitHub 反馈");
+        }
     }
 
     private void showExportResult(BppDiagnosticExporter.Saved saved) {
@@ -1328,6 +1372,68 @@ public final class BppLauncherActivity extends Activity {
         }
         builder.show();
         if (saved.shareUri != null) shareDiagnostic(saved.shareUri);
+    }
+
+    private void showGithubFeedbackResult(BppDiagnosticExporter.Saved saved) {
+        if (saved == null || !saved.ok) {
+            String error = saved == null ? "未知错误" : saved.error;
+            new AlertDialog.Builder(this)
+                .setTitle("导出失败")
+                .setMessage("诊断日志没有生成，启动器仍可继续使用。\n" + error)
+                .setPositiveButton("关闭", null)
+                .show();
+            return;
+        }
+        if (tvExportInfo != null) {
+            tvExportInfo.setVisibility(View.VISIBLE);
+            tvExportInfo.setText("最近导出：" + saved.displayPath);
+        }
+        String zipFileName = BppGithubFeedback.fileNameOnly(saved.fileName);
+        if (zipFileName.length() == 0) zipFileName = "（未生成）";
+        final String issueUrl = BppGithubFeedback.buildIssueUrl(
+            installedLauncherVersion(),
+            BppBuildInfo.VERSION_NAME,
+            BppBuildInfo.COMMIT,
+            Build.MANUFACTURER,
+            Build.MODEL,
+            Build.VERSION.RELEASE,
+            Build.VERSION.SDK_INT,
+            joinSupportedAbis(),
+            zipFileName
+        );
+        StringBuilder message = new StringBuilder();
+        message.append("诊断包已保存到系统「下载」：\n")
+            .append(zipFileName)
+            .append("\n\n请先在 GitHub 页面把「下载」文件夹里的 ")
+            .append(zipFileName)
+            .append(" 拖到正文上传；本应用不会自动上传任何文件。");
+        new AlertDialog.Builder(this)
+            .setTitle("准备 GitHub 反馈")
+            .setMessage(message.toString())
+            .setNegativeButton("关闭", null)
+            .setPositiveButton("打开 GitHub", (dialog, which) -> openGithubIssue(issueUrl))
+            .show();
+    }
+
+    private void openGithubIssue(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (android.content.ActivityNotFoundException ex) {
+            Toast.makeText(this, "无法打开浏览器，请手动访问 GitHub Issues 并附上诊断包", Toast.LENGTH_LONG).show();
+        } catch (Exception ex) {
+            Toast.makeText(this, "无法打开浏览器，请手动访问 GitHub Issues", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private String joinSupportedAbis() {
+        String[] abis = Build.SUPPORTED_ABIS;
+        if (abis == null || abis.length == 0) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < abis.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(abis[i]);
+        }
+        return sb.toString();
     }
 
     private void shareDiagnostic(Uri uri) {
