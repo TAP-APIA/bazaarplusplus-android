@@ -499,7 +499,7 @@ public class Plugin : BaseUnityPlugin
             new BppLogEvent(BppLogFeatureScope.Plugin, "plugin.android.patch_capabilities"),
             (
                 "unsupported_features",
-                "voice_callbacks,collection_variant_controls,upgrade_value_tuples,multi_tier_passive_tooltips,package_merchant_summary"
+                "voice_callbacks,collection_variant_controls,upgrade_value_tuples,multi_tier_passive_tooltips,package_merchant_summary,legendary_position_banner,hero_banner_update_player_name"
             )
         );
 #endif

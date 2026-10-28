@@ -14,6 +14,14 @@ namespace BazaarPlusPlus.Patches.LegendaryPosition;
 [HarmonyPatch(typeof(HeroBannerController), "SetLeaderboardPosition")]
 internal static class HeroBannerSetLeaderboardPositionPatch
 {
+#if BPP_ANDROID
+    // AAPCS64 passes the 8-byte Nullable<int> argument by value in a register; the
+    // ARM64 detour reads it as a pointer and the native caller crashes with an
+    // AccessViolationException. Skip the detour itself.
+    [HarmonyPrepare]
+    private static bool Prepare() => false;
+#endif
+
     [HarmonyPostfix]
     private static void Postfix(HeroBannerController __instance,
 #if BPP_ANDROID
