@@ -131,8 +131,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launc
 - `-ModpackZip` 可指定现成 ZIP，跳过重新打包。
 - `-KeyStore` / `-KeyAlias` 可改用正式签名；默认使用
   `%USERPROFILE%\.android\debug.keystore` 的 `androiddebugkey`。
-- `-VersionCode` 每次发布必须递增；默认 `42`，版本名 `6.0.0-preview.42`
-  （preview.41 是 `41`，preview.40 是 `40`）。默认输出
+- `-VersionCode` 每次发布必须递增；默认 `43`，版本名 `6.0.0-preview.43`
+  （preview.42 是 `42`，preview.41 是 `41`）。默认输出
   `dist/BepInExLauncher-bpp-android.apk`。
 - `-UnsignedOnly` 只生成对齐后的未签名 APK。
 

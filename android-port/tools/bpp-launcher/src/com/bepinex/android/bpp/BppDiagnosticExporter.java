@@ -31,6 +31,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -287,6 +288,7 @@ public final class BppDiagnosticExporter {
         addReadableTombstones(scans, activity, gameRoot);
         harvestLogs(extras, gameRoot, "logs/game-root");
         harvestLogs(extras, activity.getExternalFilesDir(null), "logs/external-files");
+        harvestJitTrace(activity, stage, extras);
 
         StringBuilder notes = new StringBuilder();
         for (int i = 0; i < errors.size(); i++) notes.append(errors.get(i)).append('\n');
@@ -928,6 +930,105 @@ public final class BppDiagnosticExporter {
             if (relative.length() == 0) relative = file.getName();
             extras.add(new BppDiagnosticBundle.ExtraFile(file, prefix + "/" + relative, true));
         }
+    }
+
+    private static void harvestJitTrace(Activity activity, File stage, List<BppDiagnosticBundle.ExtraFile> extras) {
+        File dir = BppJitTrace.traceDir(activity);
+        if (dir != null && dir.isDirectory()) {
+            File[] files = dir.listFiles();
+            if (files != null) {
+                Arrays.sort(files, new java.util.Comparator<File>() {
+                    @Override
+                    public int compare(File a, File b) {
+                        return a.getName().compareTo(b.getName());
+                    }
+                });
+                for (int i = 0; i < files.length; i++) {
+                    File file = files[i];
+                    if (!file.isFile()) continue;
+                    String name = file.getName();
+                    String lower = name.toLowerCase(Locale.ROOT);
+                    if (lower.endsWith(".log") || lower.endsWith(".txt")) {
+                        addJitTail(activity, stage, extras, file, "jit/" + name);
+                    } else if (lower.endsWith(".nettrace")) {
+                        extras.add(new BppDiagnosticBundle.ExtraFile(
+                            file, "jit/" + name, false, 24 * 1024 * 1024));
+                    }
+                }
+            }
+        }
+        File external = activity.getExternalFilesDir(null);
+        addJitFusionTail(activity, stage, extras, external,
+            "coreclr_stdout.log", "jit/fusion-coreclr_stdout.log");
+        addJitFusionTail(activity, stage, extras, external,
+            "coreclr_stderr.log", "jit/fusion-coreclr_stderr.log");
+    }
+
+    private static void addJitFusionTail(
+        Activity activity,
+        File stage,
+        List<BppDiagnosticBundle.ExtraFile> extras,
+        File external,
+        String sourceName,
+        String archivePath
+    ) {
+        File source = external == null ? null : new File(external, sourceName);
+        addJitTail(activity, stage, extras, source, archivePath);
+    }
+
+    private static void addJitTail(
+        Activity activity,
+        File stage,
+        List<BppDiagnosticBundle.ExtraFile> extras,
+        File source,
+        String archivePath
+    ) {
+        if (source == null || !source.isFile()) {
+            extras.add(new BppDiagnosticBundle.ExtraFile(source, archivePath, true));
+            return;
+        }
+        final int cap = 4 * 1024 * 1024;
+        long size;
+        try {
+            size = source.length();
+        } catch (Throwable error) {
+            BppGameProcess.logEvent(activity, "jit trace size failed: " + source, error);
+            extras.add(new BppDiagnosticBundle.ExtraFile(source, archivePath, true));
+            return;
+        }
+        long keepOffset = Math.max(0L, size - cap);
+        long keepLength = Math.min(size, (long) cap);
+        boolean truncated = size > cap;
+        File staged = new File(stage, archivePath);
+        File parent = staged.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            BppGameProcess.logEvent(activity, "jit trace stage mkdir failed: " + parent);
+            extras.add(new BppDiagnosticBundle.ExtraFile(source, archivePath, true));
+            return;
+        }
+        try (RandomAccessFile raf = new RandomAccessFile(source, "r");
+             FileOutputStream out = new FileOutputStream(staged)) {
+            if (truncated) {
+                String header = "# originalBytes=" + size + " keptTail=" + keepLength + "\n";
+                out.write(header.getBytes(StandardCharsets.UTF_8));
+            }
+            raf.seek(keepOffset);
+            byte[] buf = new byte[65536];
+            long remaining = keepLength;
+            while (remaining > 0L) {
+                int want = (int) Math.min((long) buf.length, remaining);
+                int n = raf.read(buf, 0, want);
+                if (n < 0) break;
+                out.write(buf, 0, n);
+                remaining -= n;
+            }
+            out.getFD().sync();
+        } catch (Throwable error) {
+            BppGameProcess.logEvent(activity, "jit trace tail failed: " + source, error);
+            extras.add(new BppDiagnosticBundle.ExtraFile(source, archivePath, true));
+            return;
+        }
+        extras.add(new BppDiagnosticBundle.ExtraFile(staged, archivePath, true));
     }
 
     private static String expectedPaths(Context context, File gameRoot) {
