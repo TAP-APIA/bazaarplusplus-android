@@ -105,6 +105,13 @@ public static class PlayerProfileGetDisplayUsernamePatch
 )]
 public static class UpdatePlayerPatch
 {
+#if BPP_ANDROID
+    // The trailing Nullable<int> argument crosses the same ARM64 by-value ABI fault
+    // as HeroBannerSetLeaderboardPositionPatch; SetHeroNamePatch still renames the banner.
+    [HarmonyPrepare]
+    private static bool Prepare() => false;
+#endif
+
     [HarmonyPrefix]
     private static bool Prefix(
         ref string userName,
