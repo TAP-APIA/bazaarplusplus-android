@@ -49,9 +49,12 @@ internal sealed partial class HistoryPanel
         )
             return;
         var start = new Vector2(_boardLongPress.StartX, _boardLongPress.StartY);
-        var card = _nativePlayerBoard?.ItemAt(start) ?? _nativeOpponentBoard?.ItemAt(start);
+        var bounds = default(Rect);
+        var card =
+            _nativePlayerBoard?.ItemAt(start, out bounds)
+            ?? _nativeOpponentBoard?.ItemAt(start, out bounds);
         if (card != null)
-            inspection.RequestPreviewInspection(card);
+            inspection.RequestPreviewInspection(card, bounds);
     }
 #endif
 

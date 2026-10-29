@@ -141,12 +141,12 @@ internal sealed class LiveBuildPanel
 
 #if BPP_ANDROID
         // A long-pressed board card opens the shared inspection above this panel; while it is
-        // open (and for the frame it closes) the board must not scroll or toggle candidates.
+        // opening, open, or closing this frame the board must not scroll or toggle candidates.
         var inspection = BppPatchHost.Features.CollectionInspection;
         inspection.PumpPreviewRequest();
         var inputBlocked = inspection.BlocksInput;
         if (_view != null)
-            _view.InputBlocked = inputBlocked;
+            _view.InputBlocked = inputBlocked || inspection.HasPendingPreview;
         if (inputBlocked)
             _previewRenderer?.CancelInput();
 #endif

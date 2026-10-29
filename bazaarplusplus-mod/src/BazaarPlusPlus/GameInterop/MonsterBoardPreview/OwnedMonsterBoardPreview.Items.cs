@@ -56,13 +56,22 @@ internal sealed partial class OwnedMonsterBoardPreview
     }
 
     // Parked rows sit far off-screen, so a screen point never resolves to a hidden card.
-    internal CardPreviewItem? ItemAt(Vector2 point)
+    internal CardPreviewItem? ItemAt(Vector2 point) => ItemAt(point, out _);
+
+    internal CardPreviewItem? ItemAt(Vector2 point, out Rect bounds)
     {
+        bounds = default;
         if (!_ready || _disposed || _view == null)
             return null;
         foreach (var card in _view._activeCards)
-            if (card != null && card._cardData != null && ItemBounds(card).Contains(point))
+        {
+            if (card == null || card._cardData == null)
+                continue;
+            bounds = ItemBounds(card);
+            if (bounds.Contains(point))
                 return card;
+        }
+        bounds = default;
         return null;
     }
 

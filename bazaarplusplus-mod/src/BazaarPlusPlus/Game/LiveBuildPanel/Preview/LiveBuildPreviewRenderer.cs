@@ -234,10 +234,10 @@ internal sealed class LiveBuildPreviewRenderer : IDisposable
             if (
                 _view.IsRowVisible(row.Board.Id)
                 && _rows.TryGetValue(row.Board.Id, out var preview)
-                && preview.ItemAt(start) is { } card
+                && preview.ItemAt(start, out var bounds) is { } card
             )
             {
-                BppPatchHost.Features.CollectionInspection.RequestPreviewInspection(card);
+                BppPatchHost.Features.CollectionInspection.RequestPreviewInspection(card, bounds);
                 return;
             }
         }
