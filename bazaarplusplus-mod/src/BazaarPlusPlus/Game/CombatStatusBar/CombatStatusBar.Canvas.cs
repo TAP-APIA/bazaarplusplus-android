@@ -5,6 +5,9 @@ using BazaarPlusPlus.GameInterop.Fonts;
 using BazaarPlusPlus.GameInterop.HeroPortraits;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
+#if BPP_ANDROID
+using BazaarPlusPlus.Infrastructure.UiTokens;
+#endif
 using TheBazaar;
 using TMPro;
 using UnityEngine;
@@ -61,14 +64,23 @@ internal sealed partial class CombatStatusBar
         );
         _canvasObject.transform.SetParent(transform, false);
         var canvas = _canvasObject.GetComponent<Canvas>();
+        var scaler = _canvasObject.GetComponent<CanvasScaler>();
+#if BPP_ANDROID
+        // Android docks the bar beside the touch rail on an overlay canvas whose scale factor
+        // follows the rail's touch scale.
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = BppOverlaySorting.CombatStatusBar;
+        canvas.enabled = false;
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+#else
         // Keep the screen-space layout while participating in the native transition rendering.
         // An overlay canvas would bypass the game's camera layers and transition covers.
         canvas.renderMode = RenderMode.ScreenSpaceCamera;
         canvas.enabled = false;
-        var scaler = _canvasObject.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.55f;
+#endif
 
         var barRoot = CreateRect("CombatControls", _canvasObject.transform, 0f, 0f, 220f, 46f);
         barRoot.anchorMin = barRoot.anchorMax = Vector2.zero;
@@ -241,6 +253,43 @@ internal sealed partial class CombatStatusBar
 
     private bool RefreshLayout()
     {
+#if BPP_ANDROID
+        return RefreshDockedLayout();
+#else
+        return RefreshPortraitLayout();
+#endif
+    }
+
+#if BPP_ANDROID
+    // The player portrait reaches the bottom edge on phone layouts, leaving no room for the
+    // desktop placement, so the bar takes the slot the touch rail publishes beside itself.
+    private bool RefreshDockedLayout()
+    {
+        if (_canvasObject == null || _barRoot == null || BppTouchEntry.StatusSlot is not { } slot)
+            return false;
+
+        var scale = slot.Height / AndroidOverlayGeometry.ButtonHeight;
+        if (!float.IsFinite(scale) || scale <= 0f)
+            return false;
+        var canvas = _canvasObject.GetComponent<Canvas>();
+        var scaler = _canvasObject.GetComponent<CanvasScaler>();
+        if (!Mathf.Approximately(scaler.scaleFactor, scale))
+            scaler.scaleFactor = canvas.scaleFactor = scale;
+        canvas.enabled = true;
+
+        // The bar root's pivot is bottom-centre and anchored at the canvas's bottom-left.
+        _barRoot.anchoredPosition = new Vector2(
+            (slot.Left + slot.Width * .5f) / scale,
+            slot.Bottom / scale
+        );
+        _barRoot.sizeDelta = new Vector2(slot.Width / scale, slot.Height / scale);
+        ApplyContentScale();
+        return true;
+    }
+#endif
+
+    private bool RefreshPortraitLayout()
+    {
         if (
             _canvasObject == null
             || _barRoot == null
@@ -301,6 +350,14 @@ internal sealed partial class CombatStatusBar
             return false;
         _barRoot.anchoredPosition = position - canvasRect.rect.min;
         _barRoot.sizeDelta = new Vector2(frame.width / scale, height / scale);
+        ApplyContentScale();
+        return true;
+    }
+
+    private void ApplyContentScale()
+    {
+        if (_barRoot == null)
+            return;
         var contentScale = Mathf.Min(
             1f,
             Mathf.Min(_barRoot.rect.width / 220f, _barRoot.rect.height / 46f)
@@ -311,7 +368,6 @@ internal sealed partial class CombatStatusBar
             _speedValue.fontSize = 14f * contentScale;
         if (_pauseIcon != null)
             _pauseIcon.rectTransform.sizeDelta = new Vector2(12f, 14f) * contentScale;
-        return true;
     }
 
     private void SetUiVisible(bool visible)

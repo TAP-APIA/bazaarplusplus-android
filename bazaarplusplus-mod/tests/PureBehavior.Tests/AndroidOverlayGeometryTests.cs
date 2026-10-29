@@ -101,6 +101,54 @@ public sealed class AndroidOverlayGeometryTests
     }
 
     [Fact]
+    public void Status_slot_sits_under_the_last_visible_rail_button()
+    {
+        var safe = new OverlayPixelRect(0, 0, 1920, 1080);
+        var expanded = AndroidOverlayGeometry.PlaceRail(safe, 1f, .5f, true, 2f);
+        var slot = AndroidOverlayGeometry.PlaceStatusSlot(safe, expanded, true, 2f);
+        Assert.Equal(expanded.Bottom - AndroidOverlayGeometry.DockGap * 2, slot.Top, 3);
+        Assert.Equal(AndroidOverlayGeometry.ButtonHeight * 2, slot.Height, 3);
+        // A right-edge rail grows its slot leftwards, toward the screen centre.
+        Assert.Equal(expanded.Right, slot.Right, 3);
+        Assert.Equal(AndroidOverlayGeometry.StatusSlotWidth * 2, slot.Width, 3);
+
+        var leftRail = AndroidOverlayGeometry.PlaceRail(safe, 0f, .5f, true, 2f);
+        slot = AndroidOverlayGeometry.PlaceStatusSlot(safe, leftRail, true, 2f);
+        Assert.Equal(leftRail.Left, slot.Left, 3);
+
+        var collapsed = AndroidOverlayGeometry.PlaceRail(safe, 1f, .5f, false, 2f);
+        var pillBottom = collapsed.Top - AndroidOverlayGeometry.ButtonHeight * 2;
+        slot = AndroidOverlayGeometry.PlaceStatusSlot(safe, collapsed, false, 2f);
+        Assert.Equal(pillBottom - AndroidOverlayGeometry.DockGap * 2, slot.Top, 3);
+    }
+
+    [Theory]
+    [MemberData(nameof(Displays))]
+    public void Status_slot_moves_above_the_rail_when_it_would_leave_the_safe_area(
+        float w,
+        float h,
+        float dpi
+    )
+    {
+        var g = AndroidOverlayGeometry.Create(w, h, 30, 20, w - 70, h - 40, dpi);
+        foreach (var expanded in new[] { true, false })
+        {
+            var rail = AndroidOverlayGeometry.PlaceRail(g.Safe, .5f, 0f, expanded, g.TouchScale);
+            var slot = AndroidOverlayGeometry.PlaceStatusSlot(
+                g.Safe,
+                rail,
+                expanded,
+                g.TouchScale
+            );
+            Assert.True(slot.Bottom >= g.Safe.Bottom - .01f);
+            Assert.True(slot.Bottom >= rail.Top - .01f);
+            Assert.True(slot.Top <= g.Safe.Top + .01f);
+            Assert.True(slot.Left >= g.Safe.Left - .01f);
+            Assert.True(slot.Right <= g.Safe.Right + .01f);
+        }
+    }
+
+    [Fact]
     public void Fixed_resolution_density_change_changes_touch_size_without_exposing_cutouts()
     {
         var a = AndroidOverlayGeometry.Create(3168, 1440, 100, 0, 3100, 1400, 240);
