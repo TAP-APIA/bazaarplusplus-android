@@ -1,5 +1,6 @@
 #nullable enable
 using System.Collections.Generic;
+using BazaarPlusPlus.Infrastructure;
 #if BPP_ANDROID
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 #endif
@@ -20,6 +21,7 @@ internal static class Il2CppCompat
 {
     public static List<T> ToManaged<T>(this Il2CppSystem.Collections.Generic.List<T> source)
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var result = new List<T>(source.Count);
         for (var i = 0; i < source.Count; i++)
@@ -34,6 +36,7 @@ internal static class Il2CppCompat
     /// </summary>
     public static List<T> ToManaged<T>(this Il2CppSystem.Collections.Generic.IEnumerable<T> source)
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var list = source.TryCast<Il2CppSystem.Collections.Generic.List<T>>();
         if (list == null)
@@ -52,6 +55,7 @@ internal static class Il2CppCompat
     public static List<T> ToManagedSet<T>(this Il2CppSystem.Collections.Generic.HashSet<T> source)
         where T : Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var buffer = new Il2CppReferenceArray<T>(source.Count);
         source.CopyTo(buffer, 0);
@@ -68,6 +72,7 @@ internal static class Il2CppCompat
     /// </summary>
     public static List<string> ToManagedStringSet(this Il2CppSystem.Collections.Generic.HashSet<string> source)
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var buffer = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStringArray(source.Count);
         source.CopyTo(buffer, 0);
@@ -80,6 +85,7 @@ internal static class Il2CppCompat
     public static List<T> ToManagedStructSet<T>(this Il2CppSystem.Collections.Generic.HashSet<T> source)
         where T : unmanaged
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var buffer = new Il2CppStructArray<T>(source.Count);
         source.CopyTo(buffer, 0);
@@ -94,6 +100,7 @@ internal static class Il2CppCompat
     )
         where TKey : notnull
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var buffer =
             new Il2CppReferenceArray<Il2CppSystem.Collections.Generic.KeyValuePair<TKey, TValue>>(
@@ -113,6 +120,7 @@ internal static class Il2CppCompat
     public static unsafe T? ToManagedNullable<T>(this Il2CppSystem.Nullable<T>? source)
         where T : struct
     {
+        Il2CppThreadProbe.Check();
         if (source == null || source.Pointer == System.IntPtr.Zero)
             return null;
         // il2cpp_runtime_invoke boxes a nonempty Nullable<T> as T, and an empty one as null.
@@ -143,6 +151,7 @@ internal static class Il2CppCompat
         this Il2CppSystem.Threading.Tasks.Task? nativeTask
     )
     {
+        Il2CppThreadProbe.Check();
         if (nativeTask == null)
             return System.Threading.Tasks.Task.CompletedTask;
         if (nativeTask.IsCompleted)
@@ -173,6 +182,7 @@ internal static class Il2CppCompat
 
     public static Il2CppSystem.Threading.Tasks.Task AsNativeTask(this System.Threading.Tasks.Task task)
     {
+        Il2CppThreadProbe.Check();
         var completion = new Il2CppSystem.Threading.Tasks.TaskCompletionSource<bool>();
         bool Poll()
         {
@@ -199,6 +209,7 @@ internal static class Il2CppCompat
         this Il2CppSystem.Threading.Tasks.Task<T>? nativeTask
     )
     {
+        Il2CppThreadProbe.Check();
         if (nativeTask == null)
             return System.Threading.Tasks.Task.FromResult<T?>(default);
         if (nativeTask.IsCompleted)
@@ -234,6 +245,7 @@ internal static class Il2CppCompat
         BazaarGameShared.Domain.Core.Types.ETier tier
     )
     {
+        Il2CppThreadProbe.Check();
         if (tierData?.Tiers == null)
             return null;
         if (
@@ -281,6 +293,7 @@ internal static class Il2CppCompat
     )
         where TKey : unmanaged
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var buffer = new Il2CppStructArray<TKey>(source.Count);
         source.Keys.CopyTo(buffer, 0);
@@ -299,6 +312,7 @@ internal static class Il2CppCompat
         this Il2CppSystem.Collections.Generic.Dictionary<Il2CppSystem.Guid, TValue> source
     )
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var keys = new Il2CppStructArray<Il2CppSystem.Guid>(source.Count);
         source.Keys.CopyTo(keys, 0);
@@ -316,6 +330,7 @@ internal static class Il2CppCompat
         this Il2CppSystem.Collections.Generic.IReadOnlyDictionary<TKey, TValue> source
     )
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var concrete = source.TryCast<Il2CppSystem.Collections.Generic.Dictionary<TKey, TValue>>();
         return concrete == null ? new Dictionary<TKey, TValue>() : concrete.ToManagedDictionary();
@@ -334,6 +349,7 @@ internal static class Il2CppCompat
         this IEnumerable<T> source
     )
     {
+        Il2CppThreadProbe.Check();
         var result = new Il2CppSystem.Collections.Generic.List<T>();
         foreach (var item in source)
             result.Add(item);
@@ -345,6 +361,7 @@ internal static class Il2CppCompat
         this IEnumerable<T> source
     )
     {
+        Il2CppThreadProbe.Check();
         var result = new Il2CppSystem.Collections.Generic.HashSet<T>();
         foreach (var item in source)
             result.Add(item);
@@ -358,6 +375,7 @@ internal static class Il2CppCompat
     >(this Dictionary<TKey, TValue> source)
         where TKey : notnull
     {
+        Il2CppThreadProbe.Check();
         ArgumentNullException.ThrowIfNull(source);
         var result = new Il2CppSystem.Collections.Generic.Dictionary<TKey, TValue>(source.Count);
         foreach (var pair in source)
@@ -383,6 +401,7 @@ internal static class Il2CppCompat
             this UnityEngine.Transform? transform
         )
         {
+            Il2CppThreadProbe.Check();
             if (transform == null)
                 return null;
 #if BPP_ANDROID
@@ -396,6 +415,7 @@ internal static class Il2CppCompat
             this UnityEngine.Transform transform
         )
         {
+            Il2CppThreadProbe.Check();
 #if BPP_ANDROID
             return transform.TryCast<UnityEngine.RectTransform>()
                 ?? throw new System.InvalidCastException(
@@ -408,6 +428,7 @@ internal static class Il2CppCompat
 
         public static UnityEngine.UI.Image? AsImage(this UnityEngine.UI.Graphic? graphic)
         {
+            Il2CppThreadProbe.Check();
             if (graphic == null)
                 return null;
 #if BPP_ANDROID
@@ -419,6 +440,7 @@ internal static class Il2CppCompat
 
         public static TMPro.TMP_Text? AsTmpText(this UnityEngine.UI.Graphic? graphic)
         {
+            Il2CppThreadProbe.Check();
             if (graphic == null)
                 return null;
 #if BPP_ANDROID
@@ -433,6 +455,7 @@ internal static class Il2CppCompat
             UnityEngine.Vector3[]? fourCornersArray
         )
         {
+            Il2CppThreadProbe.Check();
             if (rect == null || fourCornersArray == null || fourCornersArray.Length < 4)
                 return;
 #if BPP_ANDROID
@@ -451,6 +474,7 @@ internal static class Il2CppCompat
         public static T? AsIl2Cpp<T>(this object? value)
             where T : class
         {
+            Il2CppThreadProbe.Check();
             if (value == null)
                 return null;
             if (value is T direct)
@@ -540,6 +564,7 @@ internal static class Il2CppCompat
 
         public object? GetValue(object? instance)
         {
+            Il2CppThreadProbe.Check();
             if (instance == null)
                 return null;
             if (_field != null)
@@ -554,6 +579,7 @@ internal static class Il2CppCompat
 
         public T? GetStaticValue<T>() where T : class
         {
+            Il2CppThreadProbe.Check();
             if (_field?.IsStatic == true)
                 return _field.GetValue(null).AsIl2Cpp<T>();
             if (_property?.GetMethod?.IsStatic == true)
@@ -592,6 +618,7 @@ internal static class Il2CppCompat
             where T : class
 #endif
         {
+            Il2CppThreadProbe.Check();
             if (instance == null)
                 return;
 #if BPP_ANDROID
@@ -614,6 +641,7 @@ internal static class Il2CppCompat
 
         public void SetValue(object? instance, object? value)
         {
+            Il2CppThreadProbe.Check();
             if (instance == null)
                 return;
             if (_field != null)
