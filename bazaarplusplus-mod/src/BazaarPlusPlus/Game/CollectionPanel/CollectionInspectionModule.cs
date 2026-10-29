@@ -67,6 +67,73 @@ internal sealed class CollectionInspectionModule
 #endif
     }
 
+#if BPP_ANDROID
+    private const float PreviewRequestSeconds = .5f;
+    private CardPreviewBase? _previewRequest;
+    private float _previewRequestDeadline;
+    private IntPtr _acceptedPreview;
+
+    // Live Build and History boards have no hover on touch. A long press asks the card for its
+    // native tooltip; the lock follows once the controller shows exactly that card's data, which
+    // the native hover may publish a few frames later.
+    public void RequestPreviewInspection(CardPreviewBase card)
+    {
+        if (BlocksInput || card == null || card._tooltipData == null)
+            return;
+        _previewRequest = card;
+        _previewRequestDeadline = Time.unscaledTime + PreviewRequestSeconds;
+        try
+        {
+            card.OnHover();
+        }
+        catch (Exception ex)
+        {
+            _previewRequest = null;
+            Report(ex);
+            return;
+        }
+        PumpPreviewRequest();
+    }
+
+    public void PumpPreviewRequest()
+    {
+        var card = _previewRequest;
+        if (card == null)
+            return;
+        if (
+            BlocksInput
+            || Time.unscaledTime > _previewRequestDeadline
+            || !card.gameObject.activeInHierarchy
+            || card._tooltipData == null
+        )
+        {
+            _previewRequest = null;
+            return;
+        }
+        var controller = TheBazaar.Data.TooltipParentComponent?.CardTooltipController;
+        if (
+            controller == null
+            || !controller.isActiveAndEnabled
+            || controller.IsLocked
+            || controller.CurrentTooltipData == null
+            || controller.CurrentTooltipData.Pointer != card._tooltipData.Pointer
+        )
+            return;
+        _previewRequest = null;
+        // Preview tooltip data is neither a registered Collection card nor an in-run ItemCard,
+        // so OnLocked accepts it only for this explicit request.
+        _acceptedPreview = card._tooltipData.Pointer;
+        try
+        {
+            controller.Lock();
+        }
+        finally
+        {
+            _acceptedPreview = IntPtr.Zero;
+        }
+    }
+#endif
+
     public void Attach(
         INativeCardPreviewHost host,
         Action<bool> blockInput,
@@ -95,7 +162,11 @@ internal sealed class CollectionInspectionModule
             || !controller.IsLocked
             || controller.CurrentTooltipData.TryCast<CardTooltipData>() is not { } data
             || (!CollectionTierTooltipRegistry.Contains(data.CardInstance)
-                && data.CardInstance.TryCast<ItemCard>() == null)
+                && data.CardInstance.TryCast<ItemCard>() == null
+#if BPP_ANDROID
+                && data.Pointer != _acceptedPreview
+#endif
+            )
         )
             return;
         Close();
@@ -334,6 +405,9 @@ internal sealed class CollectionInspectionModule
 
     public void Tick(float dt)
     {
+#if BPP_ANDROID
+        PumpPreviewRequest();
+#endif
         if (
             _state.IsOpen
             && (_controller == null || !_controller.isActiveAndEnabled || !_controller.IsLocked)

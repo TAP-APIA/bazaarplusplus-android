@@ -13,60 +13,74 @@ internal static class InRunItemInspectionTests
         var card = new ItemController { PurchaseOnProceed = true };
         Release(card, new());
         Check(card.SelectCalls == 1 && card.ProceedCalls == 0,
-            "First native release must only select, not proceed/purchase");
-        Check(card.ShowCalls == 1 && controller.LockCalls == 1,
-            "First release did not open inspection through the actual pointer-up boundary");
-        Check(controller.IsLocked && controller.CurrentTooltipData?.CardInstance == card.CardData,
-            "Inspection was not locked to the clicked card");
+            "A tap must keep the native first-release select");
+        Check(card.ShowCalls == 0 && controller.LockCalls == 0,
+            "A tap opened inspection; only a long press may");
 
         // Native purchase clicks must still execute exactly once, never be replayed by the patch.
         controller = ResetTooltip();
         Release(card, new());
         Check(card.ProceedCalls == 1 && card.PurchaseCalls == 1,
             "Native second-release purchase was suppressed or replayed");
-        Check(card.ShowCalls == 1 && controller.LockCalls == 0,
-            "Purchase click opened inspection");
-
-        Reject(new ItemController(), new() { dragging = true }, "pointer drag");
-        Reject(new ItemController(), new() { button = PointerEventData.InputButton.Right }, "secondary");
-        Reject(new ItemController(), new() { button = PointerEventData.InputButton.Middle }, "middle");
-        Reject(new ItemController { IsDragging = true }, new(), "item drag");
-        Reject(new ItemController { _movedSincePress = true }, new(), "moved gesture");
-        Reject(new ItemController { _holdLockTriggered = true }, new(), "native long press");
-        Reject(new ItemController { IsPurchasedFromClick = true }, new(), "already purchased");
-        Reject(new ItemController { IsCardVisible = false }, new(), "hidden item");
-        Reject(new ItemController { CardData = null }, new(), "missing card data");
+        Check(card.ShowCalls == 0 && controller.LockCalls == 0, "Purchase click opened inspection");
 
         controller = ResetTooltip();
-        var nonItem = new CardController();
+        card = new ItemController { PurchaseOnProceed = true, _holdLockTriggered = true };
+        Release(card, new());
+        Check(card.SelectCalls == 0 && card.ProceedCalls == 0 && card.PurchaseCalls == 0,
+            "A long press must not select or purchase");
+        Check(card.ShowCalls == 1 && controller.LockCalls == 1,
+            "A long press did not open inspection through the actual pointer-up boundary");
+        Check(controller.IsLocked && controller.CurrentTooltipData?.CardInstance == card.CardData,
+            "Inspection was not locked to the long-pressed card");
+
+        Reject(Held(), new() { dragging = true }, "pointer drag");
+        Reject(Held(), new() { button = PointerEventData.InputButton.Right }, "secondary");
+        Reject(Held(), new() { button = PointerEventData.InputButton.Middle }, "middle");
+        Reject(Held(item => item.IsDragging = true), new(), "item drag");
+        Reject(Held(item => item._movedSincePress = true), new(), "moved gesture");
+        Reject(Held(item => item.IsPurchasedFromClick = true), new(), "already purchased");
+        Reject(Held(item => item.IsCardVisible = false), new(), "hidden item");
+        Reject(Held(item => item.CardData = null), new(), "missing card data");
+
+        controller = ResetTooltip();
+        var nonItem = new CardController { _holdLockTriggered = true };
         Release(nonItem, new());
         Check(nonItem.NativeUpCalls == 1 && controller.LockCalls == 0,
             "Non-item input was changed");
 
         controller = ResetTooltip();
-        card = new ItemController { PublishTooltip = false };
+        card = Held(item => item.PublishTooltip = false);
         controller.isActiveAndEnabled = true;
         controller.CurrentTooltipData = new() { CardInstance = new() { Pointer = new IntPtr(99) } };
         Release(card, new());
         Check(controller.LockCalls == 0, "Stale hover target was locked");
 
         controller = ResetTooltip();
-        card = new ItemController { PublishTooltip = false };
+        card = Held(item => item.PublishTooltip = false);
         controller.CurrentTooltipData = new() { CardInstance = card.CardData };
         Release(card, new());
         Check(controller.LockCalls == 0, "Inactive matching tooltip was locked");
 
         controller = ResetTooltip();
-        card = new ItemController { RebindOnRelease = true };
+        card = Held(item => item.RebindOnRelease = true);
         Release(card, new());
         Check(card.ShowCalls == 0 && controller.LockCalls == 0,
             "Card rebound by native input was inspected using the old release");
 
+        // A native hold that already locked the tooltip has opened inspection through OnLocked.
         controller = ResetTooltip();
         controller.IsLocked = true;
-        Release(new ItemController(), new());
+        Release(Held(), new());
         Check(controller.LockCalls == 0, "Already locked tooltip was locked a second time");
-        Console.WriteLine("Native first-select pointer-up inspection and gesture/purchase/stale-target tests pass.");
+        Console.WriteLine("Long-press pointer-up inspection and tap/gesture/purchase/stale-target tests pass.");
+    }
+
+    private static ItemController Held(Action<ItemController>? configure = null)
+    {
+        var card = new ItemController { _holdLockTriggered = true };
+        configure?.Invoke(card);
+        return card;
     }
 
     private static CardTooltipController ResetTooltip()
@@ -86,7 +100,7 @@ internal static class InRunItemInspectionTests
 
     private static void Release(CardController card, PointerEventData pointer)
     {
-        var patch = typeof(InRunItemClickInspectionPatch);
+        var patch = typeof(InRunItemLongPressInspectionPatch);
         var target = patch.GetCustomAttribute<HarmonyLib.HarmonyPatch>()!;
         Check(target.Type == typeof(CardController) && target.Method == nameof(CardController.OnPointerUp),
             "Patch must target the real pointer-up entry, not second-click-only ProceedClick");

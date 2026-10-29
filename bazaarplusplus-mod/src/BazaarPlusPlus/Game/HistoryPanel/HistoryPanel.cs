@@ -7,6 +7,9 @@ using BazaarPlusPlus.Game.Supporters;
 using BazaarPlusPlus.GameInterop;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
+#if BPP_ANDROID
+using BazaarPlusPlus.Patches;
+#endif
 using TheBazaar;
 using UnityEngine;
 
@@ -155,6 +158,9 @@ internal sealed partial class HistoryPanel
         _uiView?.Tick();
         _nativePlayerBoard?.Fit();
         _nativeOpponentBoard?.Fit();
+#if BPP_ANDROID
+        TickBoardInspection();
+#endif
     }
 
     private void OnReplayVisibilityChange(bool visible)
@@ -290,6 +296,11 @@ internal sealed partial class HistoryPanel
                 // Swallow the toggle entirely (open AND close) while the search box has focus.
                 HotkeyGuard = () => !IsVisible || !IsTextInputFocused(),
                 OnSceneChanged = OnOverlaySceneChanged,
+#if BPP_ANDROID
+                // Android back closes an inspection opened from a board before the panel.
+                IsModalInputActive = () => BppPatchHost.Features.CollectionInspection.BlocksInput,
+                DismissModal = () => BppPatchHost.Features.CollectionInspection.Close(),
+#endif
             }
         );
     }

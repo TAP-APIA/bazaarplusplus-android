@@ -7,8 +7,10 @@ using UnityEngine.EventSystems;
 
 namespace BazaarPlusPlus.Patches.CollectionPanel;
 
+// Board previews and in-run items share one gesture on touch: a long press inspects, a tap keeps
+// the game's own select/purchase behavior. Only the Collection grid inspects on a tap.
 [HarmonyPatch(typeof(CardController), nameof(CardController.OnPointerUp))]
-internal static class InRunItemClickInspectionPatch
+internal static class InRunItemLongPressInspectionPatch
 {
     [HarmonyPrepare]
     private static bool Prepare() =>
@@ -30,7 +32,7 @@ internal static class InRunItemClickInspectionPatch
             || eventData.button != PointerEventData.InputButton.Left
             || item.IsDragging
             || item._movedSincePress
-            || item._holdLockTriggered
+            || !item._holdLockTriggered
             || !item.IsCardVisible
             || item.IsPurchasedFromClick
             || item.CardData == null
@@ -54,10 +56,10 @@ internal static class InRunItemClickInspectionPatch
         )
             return;
 
-        // Android CardController.MainPointerUp selects on the first release and only calls
-        // ProceedClick on a later release. Observe OnPointerUp without replaying either native
-        // action; replaying ProceedClick here could purchase/select/fuse the card instead.
-        // Capture gesture guards before native code can clear its long-press/drag state.
+        // A native long press skips both MainPointerUp actions (Select on the first release,
+        // ProceedClick on a later one), so nothing here can purchase/select/fuse the card.
+        // Gesture guards are captured in the prefix because native release clears them.
+        // If the native hold already locked the tooltip, OnLocked has opened inspection.
         item.ShowTooltips();
         var controller = TheBazaar.Data.TooltipParentComponent?.CardTooltipController;
         if (

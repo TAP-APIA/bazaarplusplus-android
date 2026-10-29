@@ -7,6 +7,9 @@ using BazaarPlusPlus.GameInterop.MonsterBoardPreview;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
 using BazaarPlusPlus.Infrastructure.UiTokens;
+#if BPP_ANDROID
+using BazaarPlusPlus.Patches;
+#endif
 using UnityEngine;
 
 namespace BazaarPlusPlus.Game.LiveBuildPanel.Preview;
@@ -37,6 +40,10 @@ internal sealed class LiveBuildPreviewRenderer : IDisposable
     private bool _tapPending;
     private Guid _tapTemplate;
     private Vector2 _tapPointer;
+
+    // A long press inspects instead of toggling; its slop matches the board scroll threshold so
+    // a drag always scrolls and never inspects.
+    private readonly BoardLongPress _longPress = new(LiveBuildPanelLayout.BoardDragThresholdPixels);
 #endif
 
     // Parking keeps the preview's size (and therefore its fit) while moving the whole
@@ -180,6 +187,9 @@ internal sealed class LiveBuildPreviewRenderer : IDisposable
             }
         }
 #if BPP_ANDROID
+        TickLongPress(pointer, clicked);
+        if (_longPress.Fired)
+            _tapPending = false;
         if (_tapPending)
         {
             if (
@@ -204,6 +214,42 @@ internal sealed class LiveBuildPreviewRenderer : IDisposable
             _toggle(selected.Value);
         UpdateMarkers();
     }
+
+#if BPP_ANDROID
+    private void TickLongPress(Vector2? pointer, bool clicked)
+    {
+        if (pointer is not { } point)
+        {
+            _longPress.Cancel();
+            return;
+        }
+        var held = UnityEngine.InputSystem.Pointer.current?.press.isPressed == true;
+        if (!_longPress.Sample(clicked, held, point.x, point.y, Time.unscaledTime))
+            return;
+        var start = new Vector2(_longPress.StartX, _longPress.StartY);
+        if (!_view.BoardContainsPointer(start))
+            return;
+        foreach (var row in _rowModels)
+        {
+            if (
+                _view.IsRowVisible(row.Board.Id)
+                && _rows.TryGetValue(row.Board.Id, out var preview)
+                && preview.ItemAt(start) is { } card
+            )
+            {
+                BppPatchHost.Features.CollectionInspection.RequestPreviewInspection(card);
+                return;
+            }
+        }
+    }
+
+    // Inspection owns the screen: drop a pending tap or hold so its release cannot toggle a card.
+    internal void CancelInput()
+    {
+        _tapPending = false;
+        _longPress.Cancel();
+    }
+#endif
 
     // The view republishes bounds while scrolling, but visibility can also flip without a
     // size change. Park/restore here so marker state and pointer tracking follow it.
