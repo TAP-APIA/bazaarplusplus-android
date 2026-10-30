@@ -109,6 +109,7 @@ public class Plugin : BaseUnityPlugin
         _host = BppGameObjectFactory.Create("BazaarPlusPlus");
         UnityEngine.Object.DontDestroyOnLoad(_host);
         BppCoroutines.InitializeMainThread();
+        Il2CppThreadProbe.Arm();
         // Fullscreen applies to the game process only; the launcher activity keeps its insets.
         BazaarPlusPlus.GameInterop.AndroidGameFullscreen.Install();
 #else

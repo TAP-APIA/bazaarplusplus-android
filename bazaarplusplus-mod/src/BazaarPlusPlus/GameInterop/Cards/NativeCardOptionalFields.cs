@@ -83,6 +83,7 @@ internal static class NativeCardOptionalFields
     private static unsafe T? ReadAndroid<T>(Card card, string name, IntPtr declaringClass)
         where T : struct
     {
+        Il2CppThreadProbe.Check();
         if (declaringClass == IntPtr.Zero)
             throw new InvalidOperationException(
                 $"The native class that declares {name} is not initialised."

@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using BazaarPlusPlus.Infrastructure;
 using UnityEngine;
 #if BPP_ANDROID
 using Il2CppInterop.Runtime;
@@ -17,6 +18,7 @@ internal static class BppGameObjectFactory
 {
     public static GameObject Create(string name, params Type[] components)
     {
+        Il2CppThreadProbe.Check();
 #if BPP_ANDROID
         // The overload that takes a type array resolves every entry through Il2CppType; with an empty
         // array that resolution still runs and the interop hook dereferences a null class, aborting
@@ -35,6 +37,7 @@ internal static class BppGameObjectFactory
 
     public static Component? GetComponent(GameObject target, Type componentType)
     {
+        Il2CppThreadProbe.Check();
 #if BPP_ANDROID
         var comp = target.GetComponent(Il2CppType.From(componentType));
         if (comp == null)

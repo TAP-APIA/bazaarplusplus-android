@@ -35,6 +35,9 @@ internal sealed class BppCoroutines : MonoBehaviour
     }
 #endif
 
+    /// <summary>Managed id of the Unity main thread; 0 until <see cref="InitializeMainThread"/> runs.</summary>
+    internal static int MainThreadId => _mainThreadId;
+
     internal static void InitializeMainThread()
     {
         _mainThreadId = Environment.CurrentManagedThreadId;
