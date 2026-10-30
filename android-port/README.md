@@ -97,6 +97,8 @@
 - 启动器的可滚动内容避让状态栏、导航栏和屏幕开孔；横竖屏切换后重新读取系统安全边距。
 - 游戏进程通过 Android UI 线程单独隐藏系统栏并延伸到屏幕开孔区域，启动器仍保留状态栏避让。
   Pad 上已验证 Unity 渲染面达到物理显示的 2800×1968，系统栏手势后也能恢复。
+- 已验证的 HarmonyOS NEXT ANCO 设备会在 Unity Activity 交接时调用 `UnityPlayer.kill()`；启动器
+  检测到 ANCO 系统属性后自动启用已有的 kill 拦截，普通 Android 仍沿用高级设置中的选择。
 - 应用图标使用《大巴扎》徽标的白底版本，自适应图标与旧版方形/圆形图标一并替换。
 - UI 默认跟随游戏语言，游戏未保存语言时回落系统语言。可在 `[Localization] UiLanguage`
   强制 `Chinese` / `English` / `German` / `Portuguese` / `Korean` / `Italian`。
