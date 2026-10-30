@@ -18,8 +18,9 @@
     <ProjectReference Include="../BazaarPlusPlus.Android/BazaarPlusPlus.Android.csproj" />
     <ProjectReference Include="../MelonLoader/MelonLoader.csproj" />
   </ItemGroup>
+  <!-- All of it, as BazaarPlusPlus.Android does: device-generated UnityEngine.CoreModule exposes a
+       public NullableAttribute, and only the other copies make the compiler emit its own. -->
   <ItemGroup Condition="'$(InteropPath)' != ''">
-    <Reference Include="$(InteropPath)/UnityEngine.CoreModule.dll" Private="false" />
-    <Reference Include="$(InteropPath)/Il2Cppmscorlib.dll" Private="false" />
+    <Reference Include="$(InteropPath)/*.dll" Private="false" />
   </ItemGroup>
 </Project>

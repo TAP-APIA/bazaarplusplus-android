@@ -55,10 +55,29 @@ public sealed class BridgePlugin : BasePlugin
     }
 
     private static void OnSceneLoaded(Scene scene, LoadSceneMode mode) =>
-        _host?.SceneLoaded(scene.buildIndex, scene.name);
+        _host?.SceneLoaded(BuildIndexOf(scene), scene.name);
 
     private static void OnSceneUnloaded(Scene scene) =>
-        _host?.SceneUnloaded(scene.buildIndex, scene.name);
+        _host?.SceneUnloaded(BuildIndexOf(scene), scene.name);
+
+    private static bool _buildIndexUnavailable;
+
+    // The game's IL2CPP build strips Scene.GetBuildIndexInternal_Injected, so reading buildIndex
+    // throws and the melon never heard of the scene. Upstream only logs the index; -1 stands in.
+    private static int BuildIndexOf(Scene scene)
+    {
+        if (_buildIndexUnavailable)
+            return -1;
+        try
+        {
+            return scene.buildIndex;
+        }
+        catch (Exception)
+        {
+            _buildIndexUnavailable = true;
+            return -1;
+        }
+    }
 
     private static void Write(ManualLogSource log, string name, MelonLogLevel level, string text)
     {

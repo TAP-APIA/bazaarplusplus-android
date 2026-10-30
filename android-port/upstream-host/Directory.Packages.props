@@ -10,5 +10,8 @@
     <!-- The launcher's BepInEx; compile-only, the launcher supplies the runtime copies. -->
     <PackageVersion Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.790" />
     <PackageVersion Include="HarmonyX" Version="2.10.2" />
+    <!-- be.790's own dependency. The launcher's copy is rebuilt against .NET 10 and cannot be a
+         net6.0 compile reference. -->
+    <PackageVersion Include="Il2CppInterop.Runtime" Version="1.5.3" />
   </ItemGroup>
 </Project>

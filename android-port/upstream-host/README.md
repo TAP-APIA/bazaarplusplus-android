@@ -4,7 +4,7 @@
 （`bazaarplusplus-mod/src/BazaarPlusPlus.Android`，一个 LemonLoader MelonMod）原样编译，跑在本仓库的
 BepInEx 启动器里。目的：插件功能直接跟随上游，不再逐次手工移植。
 
-状态：容器内能编译的部分已编译和测试；涉及游戏程序集的编译与全部运行时行为**尚未在真机验收**。
+状态：已在真机上启动到主菜单（见「真机验收」）；对局内功能、启动器 APK 切换与联网**尚未验收**。
 验收通过前，`package-launcher.ps1` 默认仍打包本仓库原插件，加 `-Upstream` 才打包这里的版本。
 
 ## 组成
@@ -60,11 +60,11 @@ Newtonsoft/MessagePack 不再与游戏代理程序集同名，原插件的 `pack
 
    ```powershell
    dotnet build .\android-port\upstream-host\BazaarPlusPlus.BepInExBridge\BazaarPlusPlus.BepInExBridge.csproj -c Release `
-     -p:InteropPath=D:\thebarzaar\android-interop-prefixed `
-     -p:BepInExCorePath=<启动器 BepInEx\core 目录>
+     -p:InteropPath=D:\thebarzaar\android-interop-prefixed
    ```
 
-   `BepInExCorePath` 提供启动器自带的 `0Harmony.dll` 与 `Il2CppInterop.Runtime.dll`（编译引用，不打包）。
+   HarmonyX 与 Il2CppInterop.Runtime 按 be.790 的依赖版本从 NuGet 取，只作编译引用、不打包。启动器 core 里的
+   `Il2CppInterop.Runtime.dll` 是针对 .NET 10 重编的，不能作 net6.0 的编译引用。
 
 3. **打包**：
 
@@ -107,14 +107,21 @@ dotnet test android-port/tools/patch-bepinex-interop-prefix/tests/Tests.csproj
 
 启动器安装器的 Java 测试（`package-launcher.ps1` 第 1 步）覆盖了两种模组包结构，以及从原插件切换到这里时的旧文件清理。
 
-## 真机待验收
+## 真机验收
 
-- 补丁能否作用于 be.790 的 `BepInEx.Unity.IL2CPP.dll`（测试基于 BepInEx master 的同名方法结构；结构不同时补丁工具报错，不会写坏文件）；
-- 补丁后 interop 是否真的重新生成且带前缀；BepInEx 自身只依赖 `Il2Cppmscorlib` 与 `UnityEngine.*`，两种模式下名字相同；
-- `BridgePlugin` 的 `AddComponent`、场景事件委托转换是否正常；BepInEx 在第一次场景切换时才加载插件，第一个场景的 `OnSceneWasLoaded` 可能收不到；
-- `e_sqlite3` 加载（沿用原插件 `AndroidNativeLibraries` 的做法）；
-- 数据目录：melon 基础目录是游戏根目录下的 `MelonLoader/`，按上游 `AndroidPaths` 推得的 Data Root 是游戏根目录下的 `BazaarPlusPlusV6`，与原插件相同，两边 `user_version` 都是 1。设置文件换成 `MelonLoader/UserData/BazaarPlusPlus.cfg`，原插件的 `BepInEx/config/BazaarPlusPlus.cfg` 不再读取；
-- 上游的每个 Harmony 补丁在 ARM64 上能否安装（原插件踩过 `Nullable<int>` 参数与大元组返回值的崩溃）。
+2026-10-30 在 vivo PA2573（Android 16，启动器 6.0.0-preview.46，游戏 1.0.12825）上手工部署验证到主菜单：
+
+- 前缀补丁作用于 be.790 的 `BepInEx.Unity.IL2CPP.dll`；interop 下次启动时重新生成，带 `Il2Cpp` 前缀；
+- `BridgePlugin` 加载、`AddComponent` 正常；场景事件从第一个场景 `AppStart` 起都能收到。游戏的 IL2CPP 构建没有
+  `Scene.GetBuildIndexInternal_Injected`，所以 `buildIndex` 传 -1（上游只用于日志）；
+- `e_sqlite3` 加载正常，读到原插件的 `BazaarPlusPlusV6` 数据库与历史对局；
+- 上游 27 个 Harmony 补丁全部安装成功。
+
+仍待验收：
+
+- 用 `-Upstream` 打包的启动器 APK 覆盖安装后从原插件切换（上次验收是在旧启动器校验完成后手工替换文件）；
+- 对局内功能；
+- 插件内 HTTPS：CoreCLR 的 `HttpClient` 在设备上全部报 `AndroidCrypto SslException`（Bundle 上传、阵容库、赞助名单）。
 
 ## 待决定
 

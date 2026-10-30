@@ -72,8 +72,9 @@ public sealed class InteropPrefixPatchTests : IDisposable
             var candidate = Path.Combine(FixtureDir, name.Name + ".dll");
             return File.Exists(candidate) ? ctx.LoadFromAssemblyPath(candidate) : null;
         };
+        // From bytes: a path load maps the file, and Windows then refuses to delete _work.
         return context
-            .LoadFromAssemblyPath(path)
+            .LoadFromStream(new MemoryStream(File.ReadAllBytes(path)))
             .GetType("BepInEx.Unity.IL2CPP.Il2CppInteropManager", throwOnError: true)!;
     }
 }
