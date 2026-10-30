@@ -63,6 +63,7 @@ public final class BppDiagnosticExporter {
         "BepInEx/config/BazaarPlusPlus.cfg",
         "modpacks/bpp/modpack.json",
         "modpacks/bpp/config/BazaarPlusPlus.cfg",
+        "MelonLoader/UserData/BazaarPlusPlus.cfg",
         "modpacks/bpp/logs",
         "BepInEx/logs",
         "BepInEx/interop",
@@ -830,6 +831,8 @@ public final class BppDiagnosticExporter {
         }
         hashIfPresent(sb, "runtimeDll", gameRoot == null ? null : new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.dll"));
         hashIfPresent(sb, "modpackDll", gameRoot == null ? null : new File(gameRoot, "modpacks/bpp/plugins/BazaarPlusPlus.dll"));
+        hashIfPresent(sb, "runtimeBridgeDll", gameRoot == null ? null : new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.BepInExBridge.dll"));
+        hashIfPresent(sb, "runtimeUpstreamHostDll", gameRoot == null ? null : new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.Android.dll"));
         appendTreeSummary(sb, "interop", gameRoot == null ? null : new File(gameRoot, "BepInEx/interop"), ".dll");
         appendTreeSummary(sb, "unityLibs", gameRoot == null ? null : new File(gameRoot, "BepInEx/unity-libs"), null);
         appendTreeSummary(sb, "dummy", gameRoot == null ? null : new File(gameRoot, "BepInEx/dummy"), null);
