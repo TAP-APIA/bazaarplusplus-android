@@ -102,6 +102,7 @@ public final class BppLauncherActivity extends Activity {
     private final Runnable downloadPoll = this::refreshApkDownload;
 
     private volatile boolean busy;
+    private volatile boolean officialPayloadChecked;
     private volatile boolean autoLaunchConsumed;
 
     @Override
@@ -881,6 +882,7 @@ public final class BppLauncherActivity extends Activity {
             );
 
             notePrepare("ready", finalReport.detail);
+            checkOfficialPayload(gameRootDir);
             if (launchWhenReady) {
                 launchBazaarWithBpp(pkg);
             }
@@ -1560,6 +1562,38 @@ public final class BppLauncherActivity extends Activity {
         } catch (Throwable error) {
             Toast.makeText(this, "无法打开分享面板，文件仍已保存", Toast.LENGTH_LONG).show();
         }
+    }
+
+    /**
+     * Once per launcher screen, when the bundled modpack is the upstream bridge: stage a newer
+     * official Managed Payload in the background. The launch never waits for it; a payload staged
+     * before the game starts applies on that start, otherwise on the next.
+     */
+    private void checkOfficialPayload(File gameRootDir) {
+        if (officialPayloadChecked
+                || !new File(gameRootDir, "BepInEx/plugins/BazaarPlusPlus.BepInExBridge.dll").isFile()) {
+            return;
+        }
+        officialPayloadChecked = true;
+        final File installRoot = new File(getFilesDir(), BppBundledModpackInstaller.TARGET_PACKAGE);
+        final String gameVersion;
+        try {
+            gameVersion = getPackageManager()
+                .getPackageInfo(BppBundledModpackInstaller.TARGET_PACKAGE, 0).versionName;
+        } catch (Exception ex) {
+            notePrepare("official-payload", "skipped reason=game_not_installed");
+            return;
+        }
+        updateWorker.execute(() -> {
+            String outcome;
+            try {
+                outcome = BppOfficialPayload.check(installRoot, gameVersion);
+            } catch (Exception ex) {
+                outcome = "failed " + ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                logError("Official payload check failed", ex);
+            }
+            notePrepare("official-payload", outcome);
+        });
     }
 
     private void notePrepare(String outcome, String detail) {

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Installs upstream's published Android Managed Payload under the launcher's MelonLoader
+    directory, through upstream's own Updater (ADR-0014): the signature check, the journaled swap
+    and its compatibility rules come unchanged from the submodule. This adds what the launcher
+    needs around it: the bundled payload, an interop check against the device's assemblies, and a
+    guard against a payload that never reaches the main menu. No BepInEx or Unity reference, so it
+    builds and tests anywhere.
+  -->
+  <PropertyGroup>
+    <AssemblyName>BazaarPlusPlus.OfficialPayload</AssemblyName>
+    <RootNamespace>BazaarPlusPlus.OfficialPayload</RootNamespace>
+    <BppUpstreamUpdater>$(BppUpstreamModSrc)BazaarPlusPlus.Updater/</BppUpstreamUpdater>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="$(BppUpstreamUpdater)Shared/*.cs" Link="Upstream/Shared/%(Filename)%(Extension)" />
+    <Compile Include="$(BppUpstreamUpdater)ManagedPayloadSwap.cs" Link="Upstream/ManagedPayloadSwap.cs" />
+    <Compile Include="$(BppUpstreamUpdater)UpdaterLog.cs" Link="Upstream/UpdaterLog.cs" />
+    <Compile Include="$(BppUpstreamUpdater)UpdaterRun.cs" Link="Upstream/UpdaterRun.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- BepInEx/core supplies Mono.Cecil at runtime. -->
+    <PackageReference Include="Mono.Cecil" ExcludeAssets="runtime" PrivateAssets="all" />
+    <InternalsVisibleTo Include="BazaarPlusPlus.OfficialPayload.Tests" />
+  </ItemGroup>
+</Project>

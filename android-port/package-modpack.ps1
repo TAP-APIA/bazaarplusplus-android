@@ -6,9 +6,10 @@ param(
     [string] $SafeRuntime = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.Runtime.dll'),
     [string] $SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
     [switch] $Zip,
-    # Package upstream's Android Host behind the BepInEx bridge (upstream-host/README.md) instead
-    # of this fork's plugin.
-    [switch] $Upstream
+    # Package the BepInEx bridge with upstream's published Android Managed Payload bundled
+    # (upstream-host/README.md) instead of this fork's plugin.
+    [switch] $Upstream,
+    [string] $OfficialPayloadCache = (Join-Path $PSScriptRoot '../dist/official-payload')
 )
 
 # Collects the BazaarPlusPlus Android build into a distributable BepInEx modpack.
@@ -20,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($BuildOutput)) {
     $BuildOutput = if ($Upstream) {
-        Join-Path $PSScriptRoot 'upstream-host/BazaarPlusPlus.BepInExBridge/bin/Release/net6.0'
+        Join-Path $PSScriptRoot 'upstream-host/BazaarPlusPlus.BepInExBridge/bin/Release/net10.0'
     } else {
         Join-Path $PSScriptRoot '../bazaarplusplus-mod/src/BazaarPlusPlus/bin/Debug/net6.0'
     }
@@ -123,6 +124,22 @@ if (-not $Upstream) {
 $sqliteNative = Join-Path $BuildOutput 'runtimes/android-arm64/native/libe_sqlite3.so'
 if (-not (Test-Path -LiteralPath $sqliteNative)) { throw "Android SQLite library not found: $sqliteNative" }
 Copy-Item -LiteralPath $sqliteNative -Destination (Join-Path $plugins 'libe_sqlite3.so') -Force
+if ($Upstream) {
+    # The payload the bridge installs on first start, pinned by upstream-host/official-payload.json;
+    # the launcher fetches newer releases itself.
+    $pin = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'upstream-host/official-payload.json') | ConvertFrom-Json
+    New-Item -ItemType Directory -Force -Path $OfficialPayloadCache | Out-Null
+    $cached = Join-Path $OfficialPayloadCache "BazaarPlusPlus_$($pin.version)_android-aarch64-managed.zip"
+    if (-not (Test-Path -LiteralPath $cached) -or (Get-FileHash -LiteralPath $cached).Hash.ToLower() -ne $pin.sha256) {
+        Invoke-WebRequest -Uri $pin.url -OutFile $cached -UseBasicParsing
+    }
+    $actual = (Get-FileHash -LiteralPath $cached).Hash.ToLower()
+    if ($actual -ne $pin.sha256 -or (Get-Item -LiteralPath $cached).Length -ne $pin.size) {
+        Remove-Item -LiteralPath $cached -Force
+        throw "Official payload $($pin.version) does not match its pin (sha256 $actual)"
+    }
+    Copy-Item -LiteralPath $cached -Destination (Join-Path $plugins 'BazaarPlusPlus.OfficialPayload.zip') -Force
+}
 $copied = @(Get-ChildItem -LiteralPath $plugins -Filter *.dll | ForEach-Object { $_.Name })
 
 $epoch = [DateTimeOffset]'1970-01-01T00:00:00Z'

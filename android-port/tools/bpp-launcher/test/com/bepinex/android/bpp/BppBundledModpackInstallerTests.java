@@ -34,19 +34,12 @@ public final class BppBundledModpackInstallerTests {
         "core/Il2CppInterop.HarmonySupport.dll"
     };
 
-    // The upstream Android Host behind the BepInEx bridge (android-port/upstream-host).
+    // The BepInEx bridge with upstream's published payload bundled (android-port/upstream-host).
     private static final String[] REQUIRED_UPSTREAM = new String[] {
         "plugins/BazaarPlusPlus.BepInExBridge.dll",
-        "plugins/BazaarPlusPlus.Android.dll",
-        "plugins/BazaarPlusPlus.Core.dll",
-        "plugins/BazaarPlusPlus.ModApi.dll",
-        "plugins/BazaarPlusPlus.Storage.dll",
+        "plugins/BazaarPlusPlus.OfficialPayload.dll",
+        "plugins/BazaarPlusPlus.OfficialPayload.zip",
         "plugins/MelonLoader.dll",
-        "plugins/MessagePack.dll",
-        "plugins/Newtonsoft.Json.dll",
-        "plugins/Microsoft.Data.Sqlite.dll",
-        "plugins/SQLitePCLRaw.core.dll",
-        "plugins/SQLitePCLRaw.provider.e_sqlite3.dll",
         "plugins/libe_sqlite3.so",
         "core/BepInEx.Unity.IL2CPP.dll",
         "core/BepInEx.Core.dll",
@@ -338,6 +331,9 @@ public final class BppBundledModpackInstallerTests {
         assertTrue(new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.BepInExBridge.dll").isFile(), "Bridge plugin missing");
         assertTrue(!new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.dll").exists(), "Fork plugin must be retired");
         assertTrue(!new File(gameRoot, "BepInEx/plugins/Bpp.Managed.MessagePack.dll").exists(), "Fork codec must be retired");
+        assertTrue(!new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.Storage.dll").exists(),
+            "Fork storage must be retired: the payload carries its own in MelonLoader/UserLibs");
+        assertTrue(new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.OfficialPayload.zip").isFile(), "Bundled payload missing");
         assertTrue(history.isFile(), "History database must survive the switch");
     }
 

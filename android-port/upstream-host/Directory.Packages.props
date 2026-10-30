@@ -1,17 +1,13 @@
 <Project>
-  <!-- Upstream's central pins, so the shared libraries follow the submodule. -->
+  <!-- Upstream's central pins: test packages, and the SQLite native library upstream ships. -->
   <Import Project="$(BppUpstreamRoot)bazaarplusplus-mod/Directory.Packages.props" />
-  <!-- Upstream pins these only for net10.0; the same versions for net6.0. -->
-  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0'">
-    <PackageVersion Include="MessagePack" Version="3.1.4" />
-    <PackageVersion Include="Newtonsoft.Json" Version="13.0.2" />
-  </ItemGroup>
   <ItemGroup>
     <!-- The launcher's BepInEx; compile-only, the launcher supplies the runtime copies. -->
     <PackageVersion Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.790" />
     <PackageVersion Include="HarmonyX" Version="2.10.2" />
-    <!-- be.790's own dependency. The launcher's copy is rebuilt against .NET 10 and cannot be a
-         net6.0 compile reference. -->
-    <PackageVersion Include="Il2CppInterop.Runtime" Version="1.5.3" />
+    <!-- BepInEx/core ships Mono.Cecil; compile against the same line. -->
+    <PackageVersion Include="Mono.Cecil" Version="0.11.6" />
+    <!-- LemonLoader ships it beside MelonLoader; the payload references it but does not carry it. -->
+    <PackageVersion Include="Microsoft.NET.StringTools" Version="17.11.4" />
   </ItemGroup>
 </Project>

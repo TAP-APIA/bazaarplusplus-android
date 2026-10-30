@@ -168,6 +168,7 @@ try {
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGithubFeedback.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherUpdateChecker.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppOfficialPayload.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppApkDownload.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBackBridge.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java') `
