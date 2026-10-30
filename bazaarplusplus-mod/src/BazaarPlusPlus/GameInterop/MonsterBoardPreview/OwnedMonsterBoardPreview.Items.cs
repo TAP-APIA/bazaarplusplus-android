@@ -51,15 +51,27 @@ internal sealed partial class OwnedMonsterBoardPreview
     // for selection and remembers which owner's tooltip must end on replacement.
     internal Guid? TrackPointer(Vector2 point)
     {
-        _pointerItem = null;
+        _pointerItem = ItemAt(point);
+        return _pointerItem?._cardData.Id.ToSystemGuid();
+    }
+
+    // Parked rows sit far off-screen, so a screen point never resolves to a hidden card.
+    internal CardPreviewItem? ItemAt(Vector2 point) => ItemAt(point, out _);
+
+    internal CardPreviewItem? ItemAt(Vector2 point, out Rect bounds)
+    {
+        bounds = default;
         if (!_ready || _disposed || _view == null)
             return null;
         foreach (var card in _view._activeCards)
-            if (card != null && card._cardData != null && ItemBounds(card).Contains(point))
-            {
-                _pointerItem = card;
-                return card._cardData.Id.ToSystemGuid();
-            }
+        {
+            if (card == null || card._cardData == null)
+                continue;
+            bounds = ItemBounds(card);
+            if (bounds.Contains(point))
+                return card;
+        }
+        bounds = default;
         return null;
     }
 

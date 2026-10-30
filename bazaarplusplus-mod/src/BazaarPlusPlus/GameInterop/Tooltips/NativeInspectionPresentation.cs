@@ -268,8 +268,13 @@ internal sealed class NativeInspectionPresentation : IDisposable
         }
         // A drag is not a tap. Scrolling the description or pulling the card around must not
         // pop a tooltip when the finger lifts.
+        // A release whose press was never seen (the long press that opened this inspection) has
+        // no origin, so it is not a tap.
+        var pressSeen = _tapFrame >= 0;
+        var sameFrame = _tapFrame == Time.frameCount;
+        _tapFrame = -1;
         var travel = (point - _tapOrigin).magnitude;
-        if (_tapFrame == Time.frameCount || travel > TapSlop)
+        if (!pressSeen || sameFrame || travel > TapSlop)
             return false;
         return Tap(point);
     }

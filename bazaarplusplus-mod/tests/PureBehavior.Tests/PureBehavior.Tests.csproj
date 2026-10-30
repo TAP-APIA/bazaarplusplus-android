@@ -25,6 +25,7 @@
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/Tooltips/NativeInspectionSizing.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/Tooltips/InspectionBackgroundPress.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/NativeMonsterBoardLayout.cs" />
+    <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/BoardLongPress.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/NativeBoardSignature.cs" />
     <Compile Include="../../src/BazaarPlusPlus/GameInterop/MonsterBoardPreview/NativeBoardItemOptionalFields.cs" />
     <Compile Include="../../src/BazaarPlusPlus/Game/LiveBuildPanel/Ui/LiveBuildPanelLayout.cs" />

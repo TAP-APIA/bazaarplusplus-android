@@ -1,4 +1,7 @@
 using BazaarPlusPlus.GameInterop.CardPreview;
+#if BPP_ANDROID
+using BazaarPlusPlus.Patches;
+#endif
 using HarmonyLib;
 using TheBazaar.UI;
 
@@ -16,8 +19,17 @@ internal static class NativeBoardHoverPatch
 internal static class NativeBoardHoverOutPatch
 {
     [HarmonyPrefix]
-    private static void Prefix(CardPreviewBase __instance) =>
+    private static bool Prefix(CardPreviewBase __instance)
+    {
+#if BPP_ANDROID
+        // A long-pressed board card keeps its hover until the inspection it asked for ends; the
+        // finger lifting would otherwise hide or unlock that tooltip.
+        if (BppPatchHost.Features.CollectionInspection.HoldsPreviewHover(__instance))
+            return false;
+#endif
         NativeCardPreviewHost.ObserveBorrowedHover(__instance, false);
+        return true;
+    }
 }
 
 [HarmonyPatch(typeof(CardPreviewBase), "OnDestroy")]
