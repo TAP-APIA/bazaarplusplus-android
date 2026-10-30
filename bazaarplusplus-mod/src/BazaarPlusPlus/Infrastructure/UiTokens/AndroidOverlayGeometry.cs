@@ -113,6 +113,37 @@ internal readonly record struct AndroidOverlayGeometry(
         return new OverlayRailPlacement(left, top - height, width, height);
     }
 
+    // The combat status bar is wider than a pill so its timer stays readable at the desktop
+    // plaque's design size.
+    internal const float StatusSlotWidth = 220;
+
+    // The combat status bar's slot: one pill-high row directly under the rail's visible bottom
+    // (the last drawer button, or the BPP pill while collapsed), or directly above the pill when
+    // the rail sits too low for the row to fit inside the safe area. The row keeps the rail's
+    // outer edge and grows toward the screen centre.
+    internal static OverlayPixelRect PlaceStatusSlot(
+        OverlayPixelRect safe,
+        OverlayRailPlacement rail,
+        bool expanded,
+        float scale
+    )
+    {
+        var width = Math.Min(StatusSlotWidth * scale, safe.Width);
+        var height = ButtonHeight * scale;
+        var gap = DockGap * scale;
+        var visibleBottom = expanded ? rail.Bottom : rail.Top - height;
+        var bottom = visibleBottom - gap - height;
+        if (bottom < safe.Bottom)
+            bottom = rail.Top + gap;
+        var onRightHalf = rail.Left + rail.Width * .5f > safe.Left + safe.Width * .5f;
+        var left = Math.Clamp(
+            onRightHalf ? rail.Right - width : rail.Left,
+            safe.Left,
+            safe.Right - width
+        );
+        return new OverlayPixelRect(left, bottom, width, height);
+    }
+
     private static float Finite(float value, float fallback) =>
         float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
 
