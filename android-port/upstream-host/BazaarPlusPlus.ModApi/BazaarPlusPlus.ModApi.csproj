@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Upstream bazaarplusplus-mod/src/BazaarPlusPlus.ModApi, net6.0. -->
+  <PropertyGroup>
+    <AssemblyName>BazaarPlusPlus.ModApi</AssemblyName>
+    <RootNamespace>BazaarPlusPlus.ModApi</RootNamespace>
+    <BppUpstreamProject>$(BppUpstreamModSrc)BazaarPlusPlus.ModApi/</BppUpstreamProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile
+      Include="$(BppUpstreamProject)**/*.cs"
+      Exclude="$(BppUpstreamProject)bin/**;$(BppUpstreamProject)obj/**"
+      Link="%(RecursiveDir)%(Filename)%(Extension)"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MessagePack" PrivateAssets="all" />
+    <PackageReference Include="Newtonsoft.Json" PrivateAssets="all" />
+    <PackageReference Include="MessagePackAnalyzer" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

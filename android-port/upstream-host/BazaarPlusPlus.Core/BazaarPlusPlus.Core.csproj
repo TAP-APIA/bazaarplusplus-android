@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Upstream bazaarplusplus-mod/src/BazaarPlusPlus.Core, net6.0. -->
+  <PropertyGroup>
+    <AssemblyName>BazaarPlusPlus.Core</AssemblyName>
+    <RootNamespace>BazaarPlusPlus.Core</RootNamespace>
+    <BppUpstreamProject>$(BppUpstreamModSrc)BazaarPlusPlus.Core/</BppUpstreamProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile
+      Include="$(BppUpstreamProject)**/*.cs"
+      Exclude="$(BppUpstreamProject)bin/**;$(BppUpstreamProject)obj/**;$(BppUpstreamProject)Properties/IsExternalInitPolyfill.cs"
+      Link="%(RecursiveDir)%(Filename)%(Extension)"
+    />
+    <Compile
+      Include="$(BppUpstreamModSrc)BazaarPlusPlus.Updater/Shared/*.cs"
+      Link="Infrastructure/SelfUpdate/Shared/%(Filename)%(Extension)"
+    />
+    <EmbeddedResource
+      Include="$(BppUpstreamProject)Data/CollectionSources/collection-sources.json"
+      Link="Data/CollectionSources/collection-sources.json"
+      LogicalName="BazaarPlusPlus.Core.Data.CollectionSources.collection-sources.json"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../BazaarPlusPlus.ModApi/BazaarPlusPlus.ModApi.csproj" />
+    <ProjectReference Include="../BazaarPlusPlus.Storage/BazaarPlusPlus.Storage.csproj" />
+  </ItemGroup>
+</Project>

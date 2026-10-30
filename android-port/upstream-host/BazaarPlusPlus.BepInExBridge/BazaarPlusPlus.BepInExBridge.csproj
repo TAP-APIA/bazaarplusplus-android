@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The BepInEx plugin the launcher loads: it starts upstream's melon through the MelonLoader
+    compat assembly and forwards Unity's frame, scene and quit callbacks to it. Same inputs as
+    BazaarPlusPlus.Android (README.md, Building), plus the BepInEx feed.
+  -->
+  <PropertyGroup>
+    <AssemblyName>BazaarPlusPlus.BepInExBridge</AssemblyName>
+    <RootNamespace>BazaarPlusPlus.BepInExBridge</RootNamespace>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The launcher supplies BepInEx and everything it depends on. -->
+    <PackageReference Include="BepInEx.Unity.IL2CPP" ExcludeAssets="runtime" PrivateAssets="all" />
+    <ProjectReference Include="../BazaarPlusPlus.Android/BazaarPlusPlus.Android.csproj" />
+    <ProjectReference Include="../MelonLoader/MelonLoader.csproj" />
+  </ItemGroup>
+  <!-- All of it, as BazaarPlusPlus.Android does: device-generated UnityEngine.CoreModule exposes a
+       public NullableAttribute, and only the other copies make the compiler emit its own. -->
+  <ItemGroup Condition="'$(InteropPath)' != ''">
+    <Reference Include="$(InteropPath)/*.dll" Private="false" />
+  </ItemGroup>
+</Project>

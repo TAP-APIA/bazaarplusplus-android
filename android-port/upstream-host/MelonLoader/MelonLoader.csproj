@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The part of the MelonLoader API upstream's Android Host uses, implemented for the BepInEx
+    launcher. It is named MelonLoader so the host compiles and binds unchanged; it carries no
+    loader of its own: BazaarPlusPlus.BepInExBridge drives it. No BepInEx or Unity reference, so it
+    builds and tests anywhere.
+  -->
+  <PropertyGroup>
+    <AssemblyName>MelonLoader</AssemblyName>
+    <RootNamespace>MelonLoader</RootNamespace>
+    <!-- MelonLoader's own version line, so nothing that checks it sees a 0.0 loader. -->
+    <Version>0.7.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- BepInEx ships 0Harmony; compile against the same HarmonyX line, never copy it. -->
+    <PackageReference Include="HarmonyX" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

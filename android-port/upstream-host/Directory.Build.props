@@ -1,0 +1,39 @@
+<Project>
+  <!--
+    Upstream BazaarPlusPlus compiled for this fork's launcher (README.md). Sources come unchanged
+    from the pinned submodule; these projects only retarget them to the launcher's .NET 6 CoreCLR.
+  -->
+  <PropertyGroup>
+    <BppUpstreamRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', 'upstream', 'BazaarPlusPlus'))</BppUpstreamRoot>
+    <BppUpstreamModSrc>$([MSBuild]::NormalizeDirectory('$(BppUpstreamRoot)', 'bazaarplusplus-mod', 'src'))</BppUpstreamModSrc>
+    <BppVersion>$([System.IO.File]::ReadAllText('$(BppUpstreamRoot)VERSION').Trim())</BppVersion>
+    <Version>$(BppVersion)</Version>
+    <TargetFramework>net6.0</TargetFramework>
+    <!-- C# 14 static extension members carry the BCL polyfills in Polyfills/. -->
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <!-- Upstream's sources assume its warning gate's implicit usings. -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <!-- Upstream's analyzers and its warning gate run in upstream; warnings here are net6 noise. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;NU1903;NU1902</NoWarn>
+    <!-- net6.0 is out of support; the launcher's runtime is what it is. -->
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+  </PropertyGroup>
+
+  <!-- net6.0 only: the tests run on the SDK's runtime, which has the real members. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+    <Compile Include="$(MSBuildThisFileDirectory)Polyfills/*.cs" Link="Polyfills/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <Target Name="BppRequireUpstreamCheckout" BeforeTargets="PrepareForBuild">
+    <Error
+      Condition="!Exists('$(BppUpstreamModSrc)')"
+      Text="Upstream sources not found at $(BppUpstreamModSrc). Run: git submodule update --init upstream/BazaarPlusPlus"
+    />
+  </Target>
+</Project>
