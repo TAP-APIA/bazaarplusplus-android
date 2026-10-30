@@ -19,6 +19,10 @@ internal static class BppOverlaySorting
     // promoted onto its own canvas above every tray decoration. Variant chips stay above it.
     public const int InspectionDescription = 7003;
     public const int InspectionVariantControls = 7004;
+
+    // The combat status bar docks beside the touch rail: above the letterbox frame, below native
+    // system popups. Panels never overlap it because the rail and the bar hide while one is open.
+    public const int CombatStatusBar = 7100;
 #else
     public const int PanelUiToolkit = 26;
     public const int NativeCardPreview = 27;

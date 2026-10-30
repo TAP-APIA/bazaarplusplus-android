@@ -67,6 +67,107 @@ internal sealed class CollectionInspectionModule
 #endif
     }
 
+#if BPP_ANDROID
+    // The native tooltip spawns asynchronously after a hover, so allow it a moment to appear.
+    private const float PreviewRequestSeconds = 1f;
+    private CardPreviewBase? _previewCard;
+    private bool _previewPending;
+    private float _previewRequestDeadline;
+    private Rect _previewOrigin;
+    private IntPtr _acceptedPreview;
+
+    public bool HasPendingPreview => _previewPending;
+
+    // Touch lifts end a native hover. The long-pressed card keeps its hover until the request is
+    // dropped or its inspection closes, so that release cannot hide or unlock the tooltip.
+    public bool HoldsPreviewHover(CardPreviewBase card) =>
+        _previewCard != null && card != null && card.Pointer == _previewCard.Pointer;
+
+    // Live Build and History boards have no hover on touch. A long press asks the card for its
+    // native tooltip; the lock follows once the controller shows exactly that card's data.
+    public void RequestPreviewInspection(CardPreviewBase card, Rect origin)
+    {
+        if (BlocksInput || card == null || card._tooltipData == null)
+            return;
+        ReleasePreviewHover();
+        _previewCard = card;
+        _previewPending = true;
+        _previewRequestDeadline = Time.unscaledTime + PreviewRequestSeconds;
+        _previewOrigin = origin;
+        try
+        {
+            card.OnHover();
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+            ReleasePreviewHover();
+            return;
+        }
+        PumpPreviewRequest();
+    }
+
+    // Idempotent: the Collection, Live Build and History ticks may all call it in one frame.
+    public void PumpPreviewRequest()
+    {
+        if (!_previewPending)
+            return;
+        var card = _previewCard;
+        if (
+            card == null
+            || BlocksInput
+            || Time.unscaledTime > _previewRequestDeadline
+            || !card.gameObject.activeInHierarchy
+            || card._tooltipData == null
+        )
+        {
+            ReleasePreviewHover();
+            return;
+        }
+        var controller = TheBazaar.Data.TooltipParentComponent?.CardTooltipController;
+        // Read the card's data every frame: a hover may rebind it.
+        if (
+            controller == null
+            || !controller.isActiveAndEnabled
+            || controller.IsLocked
+            || controller.CurrentTooltipData == null
+            || controller.CurrentTooltipData.Pointer != card._tooltipData.Pointer
+        )
+            return;
+        _previewPending = false;
+        // Preview tooltip data is neither a registered Collection card nor an in-run ItemCard,
+        // so OnLocked accepts it only for this explicit request.
+        _acceptedPreview = card._tooltipData.Pointer;
+        try
+        {
+            controller.Lock();
+        }
+        finally
+        {
+            _acceptedPreview = IntPtr.Zero;
+        }
+        if (!_state.IsOpen)
+            ReleasePreviewHover();
+    }
+
+    private void ReleasePreviewHover()
+    {
+        var card = _previewCard;
+        _previewCard = null;
+        _previewPending = false;
+        if (card == null)
+            return;
+        try
+        {
+            card.OnHoverOut();
+        }
+        catch (Exception ex)
+        {
+            Report(ex);
+        }
+    }
+#endif
+
     public void Attach(
         INativeCardPreviewHost host,
         Action<bool> blockInput,
@@ -95,13 +196,21 @@ internal sealed class CollectionInspectionModule
             || !controller.IsLocked
             || controller.CurrentTooltipData.TryCast<CardTooltipData>() is not { } data
             || (!CollectionTierTooltipRegistry.Contains(data.CardInstance)
-                && data.CardInstance.TryCast<ItemCard>() == null)
+                && data.CardInstance.TryCast<ItemCard>() == null
+#if BPP_ANDROID
+                && data.Pointer != _acceptedPreview
+#endif
+            )
         )
             return;
         Close();
         _controller = controller;
         _inspectionData = data;
         _origin = _sourceBounds?.Invoke() ?? default;
+#if BPP_ANDROID
+        if (_acceptedPreview != IntPtr.Zero && data.Pointer == _acceptedPreview)
+            _origin = _previewOrigin;
+#endif
         _state.Open();
         _cardAnchor.Reset();
         _animation = 0f;
@@ -316,6 +425,10 @@ internal sealed class CollectionInspectionModule
         {
             DestroyVariantControls();
             _inspectionData = null;
+#if BPP_ANDROID
+            // After the unlock, so the held hover-out cannot race the lock it was protecting.
+            ReleasePreviewHover();
+#endif
             _card?.Dispose();
             _card = null;
             _previewOwner = null;
@@ -334,6 +447,9 @@ internal sealed class CollectionInspectionModule
 
     public void Tick(float dt)
     {
+#if BPP_ANDROID
+        PumpPreviewRequest();
+#endif
         if (
             _state.IsOpen
             && (_controller == null || !_controller.isActiveAndEnabled || !_controller.IsLocked)

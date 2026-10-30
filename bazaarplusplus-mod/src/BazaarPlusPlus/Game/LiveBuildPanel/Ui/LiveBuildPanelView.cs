@@ -190,6 +190,9 @@ internal sealed class LiveBuildPanelView : IDisposable
 #if BPP_ANDROID
     internal bool PointerReleasedThisFrame => Pointer.current?.press.wasReleasedThisFrame == true;
 
+    /// <summary>Set while an inspection owns the screen; board drags are ignored.</summary>
+    internal bool InputBlocked { get; set; }
+
     // A peeking preview extends below the viewport; a tap in the footer must not select a
     // card that the mask hides.
     internal bool BoardContainsPointer(Vector2 screenPoint) =>
@@ -762,6 +765,12 @@ internal sealed class LiveBuildPanelView : IDisposable
     {
         if (_boardContent == null || _geometry.Width <= 0)
             return;
+        if (InputBlocked)
+        {
+            _boardPress = false;
+            _boardDragging = false;
+            return;
+        }
         var pointer = Pointer.current;
         var position = pointer?.position.ReadValue();
         var pressed = pointer?.press.isPressed == true;

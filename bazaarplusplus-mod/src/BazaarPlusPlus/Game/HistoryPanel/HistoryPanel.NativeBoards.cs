@@ -8,6 +8,9 @@ using BazaarPlusPlus.GameInterop.MonsterBoardPreview;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
 using BazaarPlusPlus.Infrastructure.UiTokens;
+#if BPP_ANDROID
+using BazaarPlusPlus.Patches;
+#endif
 using UnityEngine;
 
 namespace BazaarPlusPlus.Game.HistoryPanel;
@@ -19,6 +22,41 @@ internal sealed partial class HistoryPanel
     private HistoryBoardFacts _nativePlayerStatus;
     private HistoryBoardFacts _nativeOpponentStatus;
     private Rect _opponentBounds;
+#if BPP_ANDROID
+    private const float BoardLongPressSlopPixels = 16f;
+    private readonly BoardLongPress _boardLongPress = new(BoardLongPressSlopPixels);
+
+    // Touch has no hover over the history boards, so a long press opens the shared inspection.
+    private void TickBoardInspection()
+    {
+        var inspection = BppPatchHost.Features.CollectionInspection;
+        inspection.PumpPreviewRequest();
+        var pointer = UnityEngine.InputSystem.Pointer.current;
+        if (pointer == null || inspection.BlocksInput)
+        {
+            _boardLongPress.Cancel();
+            return;
+        }
+        var position = pointer.position.ReadValue();
+        if (
+            !_boardLongPress.Sample(
+                pointer.press.wasPressedThisFrame,
+                pointer.press.isPressed,
+                position.x,
+                position.y,
+                Time.unscaledTime
+            )
+        )
+            return;
+        var start = new Vector2(_boardLongPress.StartX, _boardLongPress.StartY);
+        var bounds = default(Rect);
+        var card =
+            _nativePlayerBoard?.ItemAt(start, out bounds)
+            ?? _nativeOpponentBoard?.ItemAt(start, out bounds);
+        if (card != null)
+            inspection.RequestPreviewInspection(card, bounds);
+    }
+#endif
 
     private void RefreshNativeHistoryBoards()
     {

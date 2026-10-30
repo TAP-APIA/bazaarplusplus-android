@@ -81,6 +81,10 @@ internal sealed class BppTouchEntry : MonoBehaviour
 
     private static int _nextPanel;
 
+    // The combat status bar's slot beside the rail, in screen pixels. Null while the dock is not
+    // on screen, so the bar hides together with it.
+    internal static OverlayPixelRect? StatusSlot { get; private set; }
+
     // Where the dock starts before the user ever drags it: the safe right edge, vertically centred.
     private static Vector2 _initialAnchor = new(1f, .5f);
     private static Action<Vector2>? _persistAnchor;
@@ -533,6 +537,7 @@ internal sealed class BppTouchEntry : MonoBehaviour
 
     private void OnDestroy()
     {
+        StatusSlot = null;
         if (_canvasRoot != null)
             Destroy(_canvasRoot);
     }
@@ -691,6 +696,10 @@ internal sealed class BppTouchEntry : MonoBehaviour
             placement.Width,
             AndroidOverlayGeometry.ButtonHeight * scale
         );
+        StatusSlot =
+            _canvasRoot != null && _canvasRoot.activeSelf
+                ? AndroidOverlayGeometry.PlaceStatusSlot(geometry.Safe, placement, _expanded, scale)
+                : null;
     }
 
     // The dock exists to open a panel; while one is open its own close control is enough, and any
@@ -707,6 +716,8 @@ internal sealed class BppTouchEntry : MonoBehaviour
         if (hide && _dockPressing)
             EndDockDrag();
         _canvasRoot.SetActive(!hide);
+        if (hide)
+            StatusSlot = null;
     }
 
     // Long-press the BPP pill to move the rail. Input is polled instead of using uGUI drag

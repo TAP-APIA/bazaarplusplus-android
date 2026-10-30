@@ -11,6 +11,9 @@ using BazaarPlusPlus.GameInterop.ItemBoardPreview;
 using BazaarPlusPlus.GameInterop.LiveCards;
 using BazaarPlusPlus.Infrastructure;
 using BazaarPlusPlus.Infrastructure.Logging;
+#if BPP_ANDROID
+using BazaarPlusPlus.Patches;
+#endif
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -105,6 +108,13 @@ internal sealed class LiveBuildPanel
                 onClose: Close,
                 tick: Tick
             )
+#if BPP_ANDROID
+            {
+                // Android back closes an inspection opened from a board before the panel.
+                IsModalInputActive = () => BppPatchHost.Features.CollectionInspection.BlocksInput,
+                DismissModal = () => BppPatchHost.Features.CollectionInspection.Close(),
+            }
+#endif
         );
     }
 
@@ -129,6 +139,17 @@ internal sealed class LiveBuildPanel
         if (!isVisible)
             return;
 
+#if BPP_ANDROID
+        // A long-pressed board card opens the shared inspection above this panel; while it is
+        // opening, open, or closing this frame the board must not scroll or toggle candidates.
+        var inspection = BppPatchHost.Features.CollectionInspection;
+        inspection.PumpPreviewRequest();
+        var inputBlocked = inspection.BlocksInput;
+        if (_view != null)
+            _view.InputBlocked = inputBlocked || inspection.HasPendingPreview;
+        if (inputBlocked)
+            _previewRenderer?.CancelInput();
+#endif
         _view?.Tick();
 #if BPP_ANDROID
         // A touch can open the panel while Resume is still filling the native run.
@@ -160,7 +181,11 @@ internal sealed class LiveBuildPanel
 #endif
 
         // Pointer also reports touches, so the preview follows a finger on Android.
-        var pointer = UnityEngine.InputSystem.Pointer.current;
+        UnityEngine.InputSystem.Pointer? pointer = UnityEngine.InputSystem.Pointer.current;
+#if BPP_ANDROID
+        if (inputBlocked)
+            pointer = null;
+#endif
         _previewRenderer?.Tick(
             pointer?.position.ReadValue(),
             pointer?.press.wasPressedThisFrame == true

@@ -6,6 +6,13 @@ using UnityEngine;
 
 namespace BazaarPlusPlus.Patches.Tooltips;
 
+// Each reason holds its own claim on a clone, so one feature's restore cannot drop another's.
+internal enum TooltipElevationReason
+{
+    EnchantPreview,
+    AboveLockedTooltip,
+}
+
 internal static class TooltipLayerOverride
 {
     private sealed class CanvasSortingState
@@ -17,13 +24,18 @@ internal static class TooltipLayerOverride
 
         internal int SortingOrder { get; }
 
-        internal HashSet<int> Owners { get; } = new HashSet<int>();
+        internal HashSet<(int, TooltipElevationReason)> Owners { get; } =
+            new HashSet<(int, TooltipElevationReason)>();
     }
 
     private static readonly Dictionary<Canvas, CanvasSortingState> States =
         new Dictionary<Canvas, CanvasSortingState>();
 
-    internal static void SetElevated(CardTooltipController? controller, bool elevated)
+    internal static void SetElevated(
+        CardTooltipController? controller,
+        bool elevated,
+        TooltipElevationReason reason = TooltipElevationReason.EnchantPreview
+    )
     {
         if (controller == null)
             return;
@@ -34,11 +46,11 @@ internal static class TooltipLayerOverride
         // overrideSorting is not settable on a root canvas, so the one working lever is raising
         // this clone's root canvas order one step above the shared value while the preview is
         // visible.
-        var ownerId = controller.GetInstanceID();
-        Apply(controller.RootCanvasComponent, ownerId, elevated);
+        var owner = (controller.GetInstanceID(), reason);
+        Apply(controller.RootCanvasComponent, owner, elevated);
     }
 
-    private static void Apply(Canvas? canvas, int ownerId, bool elevated)
+    private static void Apply(Canvas? canvas, (int, TooltipElevationReason) owner, bool elevated)
     {
         PruneDestroyedCanvases();
         if (canvas == null)
@@ -52,7 +64,7 @@ internal static class TooltipLayerOverride
                 States.Add(canvas, state);
             }
 
-            state.Owners.Add(ownerId);
+            state.Owners.Add(owner);
             canvas.sortingOrder = ItemEnchantPreviewTooltipLayerPolicy.ElevatedSortingOrder(
                 state.SortingOrder
             );
@@ -62,7 +74,7 @@ internal static class TooltipLayerOverride
         if (!States.TryGetValue(canvas, out var existing))
             return;
 
-        existing.Owners.Remove(ownerId);
+        existing.Owners.Remove(owner);
         if (existing.Owners.Count > 0)
             return;
 
