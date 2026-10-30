@@ -49,11 +49,6 @@ public final class BppBundledModpackInstaller {
 
     private static final String[] CRITICAL_OWNED_PATHS = new String[] {
         "modpack.json",
-        "plugins/BazaarPlusPlus.ModApi.dll",
-        "plugins/BazaarPlusPlus.Storage.dll",
-        "plugins/Microsoft.Data.Sqlite.dll",
-        "plugins/SQLitePCLRaw.core.dll",
-        "plugins/SQLitePCLRaw.provider.e_sqlite3.dll",
         "plugins/libe_sqlite3.so",
         "core/BepInEx.Unity.IL2CPP.dll",
         "core/BepInEx.Core.dll",
@@ -61,25 +56,29 @@ public final class BppBundledModpackInstaller {
         "core/Il2CppInterop.HarmonySupport.dll"
     };
 
-    // The plugin itself, one complete set: this fork's own plugin, or upstream's Android Host
-    // behind the BepInEx bridge (android-port/upstream-host/README.md). Switching between them is
-    // an ordinary update: files the previous manifest owned are retired.
+    // The plugin itself, one complete set: this fork's own plugin, or the BepInEx bridge that
+    // runs upstream's published Android Managed Payload, bundled as a signed zip
+    // (android-port/upstream-host/README.md). Switching between them is an ordinary update: files
+    // the previous manifest owned are retired.
     private static final String[][] PLUGIN_PAYLOAD_VARIANTS = new String[][] {
         {
             "plugins/BazaarPlusPlus.dll",
             "plugins/BazaarPlusPlus.Localization.dll",
+            "plugins/BazaarPlusPlus.ModApi.dll",
+            "plugins/BazaarPlusPlus.Storage.dll",
             "plugins/Bpp.Managed.MessagePack.dll",
             "plugins/Bpp.Managed.MessagePack.Annotations.dll",
             "plugins/Bpp.Managed.StringTools.dll",
-            "plugins/SQLitePCLRaw.batteries_v2.dll"
+            "plugins/Microsoft.Data.Sqlite.dll",
+            "plugins/SQLitePCLRaw.batteries_v2.dll",
+            "plugins/SQLitePCLRaw.core.dll",
+            "plugins/SQLitePCLRaw.provider.e_sqlite3.dll"
         },
         {
             "plugins/BazaarPlusPlus.BepInExBridge.dll",
-            "plugins/BazaarPlusPlus.Android.dll",
-            "plugins/BazaarPlusPlus.Core.dll",
-            "plugins/MelonLoader.dll",
-            "plugins/MessagePack.dll",
-            "plugins/Newtonsoft.Json.dll"
+            "plugins/BazaarPlusPlus.OfficialPayload.dll",
+            "plugins/BazaarPlusPlus.OfficialPayload.zip",
+            "plugins/MelonLoader.dll"
         }
     };
 

@@ -1,4 +1,4 @@
-"""Run the production checker on a JVM; org.json is a pinned, host-test-only dependency."""
+"""Run the update checker and official payload tests on a JVM; org.json is a pinned, host-test-only dependency."""
 import hashlib
 import os
 from pathlib import Path
@@ -33,9 +33,12 @@ def run():
         package = Path("com/bepinex/android/bpp")
         subprocess.run([javac, "-encoding", "UTF-8", "--release", "11", "-cp", str(jar), "-d", output,
                         str(ROOT / "src" / package / "BppLauncherUpdateChecker.java"),
-                        str(ROOT / "test" / package / "BppLauncherUpdateCheckerTests.java")], check=True)
-        subprocess.run([java, "-cp", output + os.pathsep + str(jar),
-                        "com.bepinex.android.bpp.BppLauncherUpdateCheckerTests", *sys.argv[1:]], check=True)
+                        str(ROOT / "test" / package / "BppLauncherUpdateCheckerTests.java"),
+                        str(ROOT / "src" / package / "BppOfficialPayload.java"),
+                        str(ROOT / "test" / package / "BppOfficialPayloadTests.java")], check=True)
+        for tests in ("BppLauncherUpdateCheckerTests", "BppOfficialPayloadTests"):
+            subprocess.run([java, "-cp", output + os.pathsep + str(jar),
+                            "com.bepinex.android.bpp." + tests, *sys.argv[1:]], check=True)
 
 
 if __name__ == "__main__":

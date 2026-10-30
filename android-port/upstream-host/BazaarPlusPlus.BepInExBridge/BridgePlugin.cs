@@ -1,4 +1,6 @@
-using BazaarPlusPlus.Android.Host;
+using System.Reflection;
+using System.Runtime.Loader;
+using BazaarPlusPlus.OfficialPayload;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
@@ -10,17 +12,21 @@ using UnityEngine.SceneManagement;
 namespace BazaarPlusPlus.BepInExBridge;
 
 /// <summary>
-/// Starts upstream's Android Host (<see cref="AndroidMod"/>) as MelonLoader would, inside the
-/// launcher's BepInEx: its log lines go to this plugin's log source, its MelonLoader base
-/// directory is <c>MelonLoader/</c> under the game root, so its Data Root is the game root's
+/// Runs upstream's own published Android Managed Payload as LemonLoader would, inside the
+/// launcher's BepInEx. The payload lives where LemonLoader keeps it, <c>MelonLoader/Mods</c> and
+/// <c>MelonLoader/UserLibs</c> under the game root, so its Data Root is the game root's
 /// <c>BazaarPlusPlusV6</c> (upstream AndroidPaths), the directory this fork's plugin used.
+/// <see cref="OfficialPayloadInstall"/> installs and updates it before anything of it loads.
 /// </summary>
-[BepInPlugin(Guid, "BazaarPlusPlus", "1.0.0")]
+[BepInPlugin(Guid, "BazaarPlusPlus", "2.0.0")]
 public sealed class BridgePlugin : BasePlugin
 {
     public const string Guid = "com.bazaarplusplus.android.upstream";
 
+    private const string MainMenuScene = "MainMenuScene";
+
     private static MelonCompatHost? _host;
+    private static OfficialPayloadInstall? _payload;
 
     internal static MelonCompatHost? Host => _host;
 
@@ -28,11 +34,41 @@ public sealed class BridgePlugin : BasePlugin
     {
         var log = Log;
         MelonLogger.Sink = (name, level, text) => Write(log, name, level, text);
-        var melonBase = Path.Combine(Paths.GameRootPath, "MelonLoader");
-        AndroidSqlite.Load(log);
         try
         {
-            _host = MelonCompatHost.Create(typeof(AndroidMod).Assembly, melonBase);
+            LetterBoxPatches.Apply(new HarmonyLib.Harmony(Guid));
+            log.LogInfo("bridge.letterbox.patched");
+        }
+        catch (Exception exception)
+        {
+            log.LogWarning($"bridge.letterbox.unavailable {exception}");
+        }
+        var payload = new OfficialPayloadInstall(
+            Paths.GameRootPath,
+            new[]
+            {
+                Path.Combine(Paths.BepInExRootPath, "interop"),
+                Paths.BepInExAssemblyDirectory,
+                Paths.PluginPath,
+            },
+            log.LogInfo,
+            log.LogWarning,
+            log.LogError
+        );
+        payload.StageBundled(Path.Combine(Paths.PluginPath, OfficialPayloadInstall.BundledFileName));
+        payload.ScreenStaged();
+        payload.Apply();
+        if (!payload.BeginLaunch())
+            return;
+        _payload = payload;
+
+        var mod = LoadMod(payload, log);
+        if (mod == null)
+            return;
+        AndroidSqlite.Load(log, payload.UserLibsDirectory);
+        try
+        {
+            _host = MelonCompatHost.Create(mod, payload.MelonBaseDirectory);
         }
         catch (Exception exception)
         {
@@ -40,7 +76,7 @@ public sealed class BridgePlugin : BasePlugin
             return;
         }
         log.LogInfo(
-            $"bridge.loaded melon={_host.Melon.Info.Name} version={_host.Melon.Info.Version} melon_base={melonBase}"
+            $"bridge.loaded melon={_host.Melon.Info.Name} version={_host.Melon.Info.Version} melon_base={payload.MelonBaseDirectory}"
         );
         AddComponent<BridgeBehaviour>();
         SceneManager.sceneLoaded += (UnityAction<Scene, LoadSceneMode>)OnSceneLoaded;
@@ -54,8 +90,44 @@ public sealed class BridgePlugin : BasePlugin
         return true;
     }
 
-    private static void OnSceneLoaded(Scene scene, LoadSceneMode mode) =>
-        _host?.SceneLoaded(BuildIndexOf(scene), scene.name);
+    // LemonLoader's order: UserLibs resolve first, then the Mods; the mod is the assembly that
+    // names its melon.
+    private static Assembly? LoadMod(OfficialPayloadInstall payload, ManualLogSource log)
+    {
+        AssemblyLoadContext.Default.Resolving += (context, name) =>
+        {
+            foreach (var directory in new[] { payload.UserLibsDirectory, payload.ModsDirectory })
+            {
+                var candidate = Path.Combine(directory, name.Name + ".dll");
+                if (File.Exists(candidate))
+                    return context.LoadFromAssemblyPath(candidate);
+            }
+            return null;
+        };
+        try
+        {
+            foreach (var path in Directory.GetFiles(payload.ModsDirectory, "*.dll"))
+            {
+                var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
+                if (assembly.GetCustomAttribute<MelonInfoAttribute>() != null)
+                    return assembly;
+            }
+            log.LogError($"bridge.mod_missing mods={payload.ModsDirectory}");
+        }
+        catch (Exception exception)
+        {
+            log.LogError($"bridge.mod_load_failed {exception}");
+        }
+        return null;
+    }
+
+    private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        var name = scene.name;
+        if (name == MainMenuScene)
+            _payload?.ConfirmLaunch();
+        _host?.SceneLoaded(BuildIndexOf(scene), name);
+    }
 
     private static void OnSceneUnloaded(Scene scene) =>
         _host?.SceneUnloaded(BuildIndexOf(scene), scene.name);
