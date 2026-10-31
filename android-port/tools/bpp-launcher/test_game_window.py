@@ -241,8 +241,9 @@ class GameWindowTests(unittest.TestCase):
 
     def test_production_window_lifecycle(self):
         java_home = Path(os.environ["JAVA_HOME"]) if os.environ.get("JAVA_HOME") else None
-        javac = str(java_home / "bin" / "javac.exe") if java_home else shutil.which("javac")
-        java = str(java_home / "bin" / "java.exe") if java_home else shutil.which("java")
+        suffix = ".exe" if os.name == "nt" else ""
+        javac = str(java_home / "bin" / ("javac" + suffix)) if java_home else shutil.which("javac")
+        java = str(java_home / "bin" / ("java" + suffix)) if java_home else shutil.which("java")
         self.assertTrue(javac and java, "JDK required")
         with tempfile.TemporaryDirectory(prefix="bpp-window-tests-") as temporary:
             root = Path(temporary)

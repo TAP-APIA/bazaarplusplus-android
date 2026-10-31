@@ -32,7 +32,9 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -43,6 +45,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Self-deploying BazaarPlusPlus Android launcher activity.
@@ -912,11 +915,13 @@ public final class BppLauncherActivity extends Activity {
                 packageName,
                 false
             );
-            boolean blockUnityKill = readAppSettingBoolean(
+            boolean configuredBlockUnityKill = readAppSettingBoolean(
                 "isUnityKillBlockEnabledFlow",
                 packageName,
                 false
             );
+            boolean harmonyAnco = isHarmonyAnco();
+            boolean blockUnityKill = configuredBlockUnityKill || harmonyAnco;
             boolean screenDim = readAppSettingBoolean(
                 "getScreenDimInGameEnabledFlow",
                 null,
@@ -939,6 +944,8 @@ public final class BppLauncherActivity extends Activity {
                     + " gamePid=pending"
                     + " ogLibUnity=" + useOriginalLibUnity
                     + " blockUnityKill=" + blockUnityKill
+                    + " blockUnityKillSource="
+                    + (configuredBlockUnityKill ? "setting" : harmonyAnco ? "harmony-anco" : "default")
                     + " screenDim=" + screenDim
                     + " floatingLog=" + floatingLog
                     + " modpack=" + BppBundledModpackInstaller.MODPACK_NAME
@@ -983,6 +990,42 @@ public final class BppLauncherActivity extends Activity {
                     ).show();
                 }
             });
+        }
+    }
+
+    private boolean isHarmonyAnco() {
+        return BppPlatformCompatibility.isHarmonyAnco(
+            readSystemProperty("ro.ark.anco.version"),
+            readSystemProperty("ro.product.os.dist.anco.apiversion"),
+            readSystemProperty("hw_sc.anco.enable"),
+            Build.MANUFACTURER,
+            Build.VERSION.SDK_INT,
+            Build.DISPLAY
+        );
+    }
+
+    private static String readSystemProperty(String name) {
+        java.lang.Process command = null;
+        try {
+            command = new ProcessBuilder("/system/bin/getprop", name)
+                .redirectErrorStream(true)
+                .start();
+            if (!command.waitFor(500L, TimeUnit.MILLISECONDS)) {
+                command.destroy();
+                return "";
+            }
+            try (
+                BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(command.getInputStream(), java.nio.charset.StandardCharsets.UTF_8)
+                )
+            ) {
+                String value = reader.readLine();
+                return value == null ? "" : value.trim();
+            }
+        } catch (Exception ignored) {
+            return "";
+        } finally {
+            if (command != null) command.destroy();
         }
     }
 

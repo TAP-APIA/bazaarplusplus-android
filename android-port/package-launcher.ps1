@@ -128,6 +128,9 @@ try {
     & python (Join-Path $launcherToolsDir 'test_apk_download.py')
     if ($LASTEXITCODE -ne 0) { throw 'Launcher APK download tests failed' }
 
+    & python (Join-Path $launcherToolsDir 'test_platform_compatibility.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Platform compatibility tests failed' }
+
     # 1.5 Bake the git commit and version into a generated BppBuildInfo.java, then compile that
     # generated copy instead of the source placeholder.
     $commit = 'unknown'
@@ -165,6 +168,7 @@ try {
     & $javac -encoding UTF-8 --release 11 -cp $platformJar -d $appClasses `
         $generatedBuildInfo `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBundledModpackInstaller.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppPlatformCompatibility.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGithubFeedback.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherUpdateChecker.java') `
