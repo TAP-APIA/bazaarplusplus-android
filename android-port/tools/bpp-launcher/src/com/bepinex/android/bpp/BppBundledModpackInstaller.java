@@ -49,22 +49,37 @@ public final class BppBundledModpackInstaller {
 
     private static final String[] CRITICAL_OWNED_PATHS = new String[] {
         "modpack.json",
-        "plugins/BazaarPlusPlus.dll",
-        "plugins/BazaarPlusPlus.Localization.dll",
-        "plugins/BazaarPlusPlus.ModApi.dll",
-        "plugins/BazaarPlusPlus.Storage.dll",
-        "plugins/Bpp.Managed.MessagePack.dll",
-        "plugins/Bpp.Managed.MessagePack.Annotations.dll",
-        "plugins/Bpp.Managed.StringTools.dll",
-        "plugins/Microsoft.Data.Sqlite.dll",
-        "plugins/SQLitePCLRaw.core.dll",
-        "plugins/SQLitePCLRaw.provider.e_sqlite3.dll",
-        "plugins/SQLitePCLRaw.batteries_v2.dll",
         "plugins/libe_sqlite3.so",
         "core/BepInEx.Unity.IL2CPP.dll",
         "core/BepInEx.Core.dll",
         "core/Il2CppInterop.Runtime.dll",
         "core/Il2CppInterop.HarmonySupport.dll"
+    };
+
+    // The plugin itself, one complete set: this fork's own plugin, or the BepInEx bridge that
+    // runs upstream's published Android Managed Payload, bundled as a signed zip
+    // (android-port/upstream-host/README.md). Switching between them is an ordinary update: files
+    // the previous manifest owned are retired.
+    private static final String[][] PLUGIN_PAYLOAD_VARIANTS = new String[][] {
+        {
+            "plugins/BazaarPlusPlus.dll",
+            "plugins/BazaarPlusPlus.Localization.dll",
+            "plugins/BazaarPlusPlus.ModApi.dll",
+            "plugins/BazaarPlusPlus.Storage.dll",
+            "plugins/Bpp.Managed.MessagePack.dll",
+            "plugins/Bpp.Managed.MessagePack.Annotations.dll",
+            "plugins/Bpp.Managed.StringTools.dll",
+            "plugins/Microsoft.Data.Sqlite.dll",
+            "plugins/SQLitePCLRaw.batteries_v2.dll",
+            "plugins/SQLitePCLRaw.core.dll",
+            "plugins/SQLitePCLRaw.provider.e_sqlite3.dll"
+        },
+        {
+            "plugins/BazaarPlusPlus.BepInExBridge.dll",
+            "plugins/BazaarPlusPlus.OfficialPayload.dll",
+            "plugins/BazaarPlusPlus.OfficialPayload.zip",
+            "plugins/MelonLoader.dll"
+        }
     };
 
     public interface StreamSupplier {
@@ -200,7 +215,28 @@ public final class BppBundledModpackInstaller {
                 throw new IOException("Manifest is missing required payload entry: " + required);
             }
         }
+        if (!containsAnyVariant(entries.keySet())) {
+            throw new IOException(
+                "Manifest carries no complete plugin payload: expected all of "
+                    + String.join(", ", PLUGIN_PAYLOAD_VARIANTS[0])
+                    + " or all of "
+                    + String.join(", ", PLUGIN_PAYLOAD_VARIANTS[1])
+            );
+        }
         return new Manifest(bundleId, version, entries);
+    }
+
+    private static boolean containsAnyVariant(Set<String> paths) {
+        for (String[] variant : PLUGIN_PAYLOAD_VARIANTS) {
+            boolean complete = true;
+            for (String path : variant) {
+                complete &= paths.contains(path);
+            }
+            if (complete) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static StatusReport inspectStatus(
@@ -214,8 +250,10 @@ public final class BppBundledModpackInstaller {
         File modpackDir = new File(gameRootDir, "modpacks/" + MODPACK_NAME);
         File runtimeDir = new File(gameRootDir, "BepInEx");
         if (state == null) {
-            boolean anyExisting = new File(modpackDir, "plugins/BazaarPlusPlus.dll").exists()
-                || new File(runtimeDir, "plugins/BazaarPlusPlus.dll").exists();
+            boolean anyExisting = false;
+            for (String plugin : new String[] { "plugins/BazaarPlusPlus.dll", "plugins/BazaarPlusPlus.BepInExBridge.dll" }) {
+                anyExisting |= new File(modpackDir, plugin).exists() || new File(runtimeDir, plugin).exists();
+            }
             return new StatusReport(
                 anyExisting ? StatusKind.NEEDS_UPDATE : StatusKind.NEEDS_INSTALL,
                 manifest.bundleId,

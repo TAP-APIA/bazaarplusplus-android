@@ -1,11 +1,15 @@
 param(
-    [string] $BuildOutput = (Join-Path $PSScriptRoot '../bazaarplusplus-mod/src/BazaarPlusPlus/bin/Debug/net6.0'),
+    [string] $BuildOutput = '',
     [string] $Destination = (Join-Path $PSScriptRoot '../dist/bpp-modpack'),
     [string] $LauncherApk = (Join-Path $PSScriptRoot '../dist/app-release-aligned.apk'),
     [string] $InteropSnapshot = (Join-Path $PSScriptRoot '../android-managed'),
     [string] $SafeRuntime = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.Runtime.dll'),
     [string] $SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
-    [switch] $Zip
+    [switch] $Zip,
+    # Package the BepInEx bridge with upstream's published Android Managed Payload bundled
+    # (upstream-host/README.md) instead of this fork's plugin.
+    [switch] $Upstream,
+    [string] $OfficialPayloadCache = (Join-Path $PSScriptRoot '../dist/official-payload')
 )
 
 # Collects the BazaarPlusPlus Android build into a distributable BepInEx modpack.
@@ -15,6 +19,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if ([string]::IsNullOrWhiteSpace($BuildOutput)) {
+    $BuildOutput = if ($Upstream) {
+        Join-Path $PSScriptRoot 'upstream-host/BazaarPlusPlus.BepInExBridge/bin/Release/net10.0'
+    } else {
+        Join-Path $PSScriptRoot '../bazaarplusplus-mod/src/BazaarPlusPlus/bin/Debug/net6.0'
+    }
+}
 if (-not (Test-Path $BuildOutput)) {
     throw "Build output not found: $BuildOutput (run the Android build first)."
 }
@@ -85,6 +96,14 @@ foreach ($retiredCore in @('Il2CppInterop.Runtime.dll', 'Il2CppInterop.HarmonySu
 Copy-Item -LiteralPath $safeRuntime -Destination (Join-Path $core 'Il2CppInterop.Runtime.dll') -Force
 if (-not (Test-Path -LiteralPath $safeHarmony)) { throw "Patched ARM64 Harmony support not found: $safeHarmony" }
 Copy-Item -LiteralPath $safeHarmony -Destination (Join-Path $core 'Il2CppInterop.HarmonySupport.dll') -Force
+if ($Upstream) {
+    # Upstream's host binds MelonLoader-style interop names; make BepInEx generate them on the
+    # device (tools/patch-bepinex-interop-prefix).
+    $bepInExEntry = Join-Path $core 'BepInEx.Unity.IL2CPP.dll'
+    & dotnet run --project (Join-Path $PSScriptRoot 'tools/patch-bepinex-interop-prefix/Patch.csproj') -- `
+        $bepInExEntry $bepInExEntry $core
+    if ($LASTEXITCODE -ne 0) { throw 'BepInEx interop prefix patch failed' }
+}
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
 Get-ChildItem $plugins -Filter *.dll -ErrorAction SilentlyContinue | Remove-Item -Force
 
@@ -96,12 +115,31 @@ Get-ChildItem $BuildOutput -Filter *.dll | ForEach-Object {
     $copied += $_.Name
 }
 
-# Keep portable DTO codecs separate from the game's same-name IL2CPP proxy assemblies.
-& dotnet run --project (Join-Path $PSScriptRoot 'tools/package-managed-codec/Package.csproj') -- $BuildOutput $plugins
-if ($LASTEXITCODE -ne 0) { throw 'Managed codec packaging failed' }
+if (-not $Upstream) {
+    # Keep portable DTO codecs separate from the game's same-name IL2CPP proxy assemblies. The
+    # upstream payload needs no aliases: its interop names carry the Il2Cpp prefix.
+    & dotnet run --project (Join-Path $PSScriptRoot 'tools/package-managed-codec/Package.csproj') -- $BuildOutput $plugins
+    if ($LASTEXITCODE -ne 0) { throw 'Managed codec packaging failed' }
+}
 $sqliteNative = Join-Path $BuildOutput 'runtimes/android-arm64/native/libe_sqlite3.so'
 if (-not (Test-Path -LiteralPath $sqliteNative)) { throw "Android SQLite library not found: $sqliteNative" }
 Copy-Item -LiteralPath $sqliteNative -Destination (Join-Path $plugins 'libe_sqlite3.so') -Force
+if ($Upstream) {
+    # The payload the bridge installs on first start, pinned by upstream-host/official-payload.json;
+    # the launcher fetches newer releases itself.
+    $pin = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'upstream-host/official-payload.json') | ConvertFrom-Json
+    New-Item -ItemType Directory -Force -Path $OfficialPayloadCache | Out-Null
+    $cached = Join-Path $OfficialPayloadCache "BazaarPlusPlus_$($pin.version)_android-aarch64-managed.zip"
+    if (-not (Test-Path -LiteralPath $cached) -or (Get-FileHash -LiteralPath $cached).Hash.ToLower() -ne $pin.sha256) {
+        Invoke-WebRequest -Uri $pin.url -OutFile $cached -UseBasicParsing
+    }
+    $actual = (Get-FileHash -LiteralPath $cached).Hash.ToLower()
+    if ($actual -ne $pin.sha256 -or (Get-Item -LiteralPath $cached).Length -ne $pin.size) {
+        Remove-Item -LiteralPath $cached -Force
+        throw "Official payload $($pin.version) does not match its pin (sha256 $actual)"
+    }
+    Copy-Item -LiteralPath $cached -Destination (Join-Path $plugins 'BazaarPlusPlus.OfficialPayload.zip') -Force
+}
 $copied = @(Get-ChildItem -LiteralPath $plugins -Filter *.dll | ForEach-Object { $_.Name })
 
 $epoch = [DateTimeOffset]'1970-01-01T00:00:00Z'

@@ -34,12 +34,27 @@ public final class BppBundledModpackInstallerTests {
         "core/Il2CppInterop.HarmonySupport.dll"
     };
 
+    // The BepInEx bridge with upstream's published payload bundled (android-port/upstream-host).
+    private static final String[] REQUIRED_UPSTREAM = new String[] {
+        "plugins/BazaarPlusPlus.BepInExBridge.dll",
+        "plugins/BazaarPlusPlus.OfficialPayload.dll",
+        "plugins/BazaarPlusPlus.OfficialPayload.zip",
+        "plugins/MelonLoader.dll",
+        "plugins/libe_sqlite3.so",
+        "core/BepInEx.Unity.IL2CPP.dll",
+        "core/BepInEx.Core.dll",
+        "core/Il2CppInterop.Runtime.dll",
+        "core/Il2CppInterop.HarmonySupport.dll"
+    };
+
     public static void main(String[] args) throws Exception {
         testFirstInstallAndConfigSeeding();
         testUpgradePreservesUserConfigHistoryAndMetadataAndRetiresOldOwnedOnly();
         testRepairFixesMissingOrCorruptedFile();
         testRejectsTraversalUnlistedAndCorruptArchivesWithoutMutatingTarget();
         testInterruptedInProgressStateRequiresRepair();
+        testSwitchToUpstreamPayloadRetiresForkPlugin();
+        testRejectsIncompletePluginPayload();
         System.out.println("PASS: all BppBundledModpackInstaller tests succeeded.");
     }
 
@@ -284,14 +299,78 @@ public final class BppBundledModpackInstallerTests {
         }
     }
 
+    private static void testSwitchToUpstreamPayloadRetiresForkPlugin() throws Exception {
+        File root = Files.createTempDirectory("bpp-installer-switch").toFile();
+        File gameRoot = new File(root, "game");
+        File workDir = new File(root, "work");
+        FixtureBundle fork = createFixtureBundle("fork", null);
+        BppBundledModpackInstaller.installOrUpdate(
+            gameRoot,
+            workDir,
+            () -> new ByteArrayInputStream(fork.manifestBytes),
+            () -> new ByteArrayInputStream(fork.zipBytes),
+            null,
+            false,
+            null
+        );
+        File history = new File(gameRoot, "BazaarPlusPlusV6/bazaarplusplus.db");
+        history.getParentFile().mkdirs();
+        Files.write(history.toPath(), "history-keep".getBytes(StandardCharsets.UTF_8));
+
+        FixtureBundle upstream = createFixtureBundle("upstream", null, REQUIRED_UPSTREAM);
+        BppBundledModpackInstaller.StatusReport switched = BppBundledModpackInstaller.installOrUpdate(
+            gameRoot,
+            workDir,
+            () -> new ByteArrayInputStream(upstream.manifestBytes),
+            () -> new ByteArrayInputStream(upstream.zipBytes),
+            null,
+            false,
+            null
+        );
+        assertTrue(switched.isReady(), "Expected READY after switching to the upstream payload");
+        assertTrue(new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.BepInExBridge.dll").isFile(), "Bridge plugin missing");
+        assertTrue(!new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.dll").exists(), "Fork plugin must be retired");
+        assertTrue(!new File(gameRoot, "BepInEx/plugins/Bpp.Managed.MessagePack.dll").exists(), "Fork codec must be retired");
+        assertTrue(!new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.Storage.dll").exists(),
+            "Fork storage must be retired: the payload carries its own in MelonLoader/UserLibs");
+        assertTrue(new File(gameRoot, "BepInEx/plugins/BazaarPlusPlus.OfficialPayload.zip").isFile(), "Bundled payload missing");
+        assertTrue(history.isFile(), "History database must survive the switch");
+    }
+
+    private static void testRejectsIncompletePluginPayload() throws Exception {
+        String[] partial = new String[REQUIRED_UPSTREAM.length - 1];
+        int i = 0;
+        for (String path : REQUIRED_UPSTREAM) {
+            if (!path.equals("plugins/MelonLoader.dll")) {
+                partial[i++] = path;
+            }
+        }
+        FixtureBundle bundle = createFixtureBundle("partial", null, partial);
+        try {
+            BppBundledModpackInstaller.parseManifest(new ByteArrayInputStream(bundle.manifestBytes));
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("no complete plugin payload"), "Unexpected error: " + expected.getMessage());
+            return;
+        }
+        throw new AssertionError("A payload missing MelonLoader.dll must be rejected");
+    }
+
     private static FixtureBundle createFixtureBundle(String tag, Map<String, String> extras) throws Exception {
+        return createFixtureBundle(tag, extras, REQUIRED);
+    }
+
+    private static FixtureBundle createFixtureBundle(
+        String tag,
+        Map<String, String> extras,
+        String[] required
+    ) throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<String, byte[]>();
         files.put(
             "modpack.json",
             "{\"name\":\"bpp\",\"packageName\":\"com.tempogames.thebazaar\",\"createdAt\":1,\"modCount\":11,\"createShortcut\":false}"
                 .getBytes(StandardCharsets.UTF_8)
         );
-        for (String path : REQUIRED) {
+        for (String path : required) {
             files.put(path, (path + ":" + tag).getBytes(StandardCharsets.UTF_8));
         }
         if (extras != null) {

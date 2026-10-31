@@ -2,7 +2,7 @@ param(
     [string]$SourceApk = (Join-Path $PSScriptRoot '../dist/app-bpp-fixed.apk'),
     [string]$Destination = (Join-Path $PSScriptRoot '../dist/BepInExLauncher-bpp-android.apk'),
     [string]$ModpackZip = '',
-    [string]$BuildOutput = (Join-Path $PSScriptRoot '../bazaarplusplus-mod/src/BazaarPlusPlus/bin/Debug/net6.0'),
+    [string]$BuildOutput = '',
     [string]$InteropSnapshot = (Join-Path $PSScriptRoot '../android-managed'),
     [string]$SafeRuntime = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.Runtime.dll'),
     [string]$SafeHarmony = (Join-Path $PSScriptRoot '../safe_Il2CppInterop.HarmonySupport.dll'),
@@ -10,7 +10,9 @@ param(
     [string]$KeyAlias = 'androiddebugkey',
     [int]$VersionCode = 44,
     [string]$AndroidSdkRoot = $env:ANDROID_SDK_ROOT,
-    [switch]$UnsignedOnly
+    [switch]$UnsignedOnly,
+    # Bundle upstream's Android Host behind the BepInEx bridge (upstream-host/README.md).
+    [switch]$Upstream
 )
 
 # Builds the self-deploying BazaarPlusPlus Android APK by combining the verified
@@ -81,6 +83,7 @@ try {
             -InteropSnapshot $InteropSnapshot `
             -SafeRuntime $SafeRuntime `
             -SafeHarmony $SafeHarmony `
+            -Upstream:$Upstream `
             -Zip
         if ($LASTEXITCODE -ne 0) { throw 'package-modpack.ps1 failed' }
         $ModpackZip = "$modpackDir.zip"
@@ -169,6 +172,7 @@ try {
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherActivity.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGithubFeedback.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppLauncherUpdateChecker.java') `
+        (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppOfficialPayload.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppApkDownload.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppBackBridge.java') `
         (Join-Path $launcherToolsDir 'src/com/bepinex/android/bpp/BppGameWindow.java') `

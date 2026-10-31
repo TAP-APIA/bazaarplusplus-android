@@ -148,6 +148,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\android-port\package-launc
 
 发布时只需上传 APK、本说明和 SHA-256；不要再附带单独的模组 ZIP 或 ADB 部署脚本。
 
+## 上游官方插件包（实验）
+
+`upstream-host/` 让本启动器直接运行上游 BazaarPlusPlus 官方发布的 Android 托管插件包，并由启动器自动下载、
+校验、安装官方新版本，不再逐次手工移植。打包时给 `package-launcher.ps1` 加 `-Upstream`；工作方式、构建与真机
+待验收事项见 [upstream-host/README.md](upstream-host/README.md)。验收通过前默认仍打包本仓库原插件。
+
 ## 不要修改 libpine
 
 `lib/arm64-v8a/libpine.so` 的 `Pine_init0` 若被改成直接 `ret`，会使 `Pine.arch` 未初始化，

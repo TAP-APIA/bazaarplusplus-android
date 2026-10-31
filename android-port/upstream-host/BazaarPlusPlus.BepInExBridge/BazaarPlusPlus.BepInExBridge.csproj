@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The BepInEx plugin the launcher loads: it installs upstream's published Android Managed
+    Payload (BazaarPlusPlus.OfficialPayload), starts its melon through the MelonLoader compat
+    assembly and forwards Unity's frame, scene and quit callbacks to it. Input: InteropPath, the
+    device-generated Il2Cpp-prefixed interop (README.md, Building).
+  -->
+  <PropertyGroup>
+    <AssemblyName>BazaarPlusPlus.BepInExBridge</AssemblyName>
+    <RootNamespace>BazaarPlusPlus.BepInExBridge</RootNamespace>
+    <Version>2.0.0</Version>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The launcher supplies BepInEx and everything it depends on. -->
+    <PackageReference Include="BepInEx.Unity.IL2CPP" ExcludeAssets="runtime" PrivateAssets="all" />
+    <ProjectReference Include="../MelonLoader/MelonLoader.csproj" />
+    <ProjectReference Include="../BazaarPlusPlus.OfficialPayload/BazaarPlusPlus.OfficialPayload.csproj" />
+    <!-- What LemonLoader's APK supplies beside the payload: shipped in BepInEx/plugins. -->
+    <PackageReference Include="Microsoft.NET.StringTools" />
+    <PackageReference Include="SourceGear.sqlite3" />
+  </ItemGroup>
+  <!-- All of it: device-generated UnityEngine.CoreModule exposes a public NullableAttribute, and
+       only the other copies make the compiler emit its own. -->
+  <ItemGroup Condition="'$(InteropPath)' != ''">
+    <Reference Include="$(InteropPath)/*.dll" Private="false" />
+  </ItemGroup>
+  <Target Name="BppRequireInterop" BeforeTargets="ResolveAssemblyReferences">
+    <Error
+      Condition="'$(InteropPath)' == '' or !Exists('$(InteropPath)')"
+      Text="Pass -p:InteropPath=&lt;device-generated prefixed interop directory&gt; (README.md, Building)."
+    />
+  </Target>
+</Project>

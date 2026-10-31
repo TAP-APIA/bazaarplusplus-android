@@ -1,0 +1,13 @@
+<Project>
+  <!-- Upstream's central pins: test packages, and the SQLite native library upstream ships. -->
+  <Import Project="$(BppUpstreamRoot)bazaarplusplus-mod/Directory.Packages.props" />
+  <ItemGroup>
+    <!-- The launcher's BepInEx; compile-only, the launcher supplies the runtime copies. -->
+    <PackageVersion Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.790" />
+    <PackageVersion Include="HarmonyX" Version="2.10.2" />
+    <!-- BepInEx/core ships Mono.Cecil; compile against the same line. -->
+    <PackageVersion Include="Mono.Cecil" Version="0.11.6" />
+    <!-- LemonLoader ships it beside MelonLoader; the payload references it but does not carry it. -->
+    <PackageVersion Include="Microsoft.NET.StringTools" Version="17.11.4" />
+  </ItemGroup>
+</Project>

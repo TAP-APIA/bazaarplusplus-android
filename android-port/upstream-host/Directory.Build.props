@@ -1,0 +1,28 @@
+<Project>
+  <!--
+    The BepInEx side of running upstream BazaarPlusPlus's own published Android Managed Payload in
+    this fork's launcher (README.md). The launcher's CoreCLR is .NET 10, the payload's own target.
+    Upstream's Updater sources come unchanged from the pinned submodule.
+  -->
+  <PropertyGroup>
+    <BppUpstreamRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', 'upstream', 'BazaarPlusPlus'))</BppUpstreamRoot>
+    <BppUpstreamModSrc>$([MSBuild]::NormalizeDirectory('$(BppUpstreamRoot)', 'bazaarplusplus-mod', 'src'))</BppUpstreamModSrc>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;NU1903;NU1902</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="BppRequireUpstreamCheckout" BeforeTargets="PrepareForBuild">
+    <Error
+      Condition="!Exists('$(BppUpstreamModSrc)')"
+      Text="Upstream sources not found at $(BppUpstreamModSrc). Run: git submodule update --init upstream/BazaarPlusPlus"
+    />
+  </Target>
+</Project>
