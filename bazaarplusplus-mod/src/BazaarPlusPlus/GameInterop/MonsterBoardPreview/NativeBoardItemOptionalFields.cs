@@ -34,6 +34,7 @@ internal static class NativeBoardItemOptionalFields
     private static unsafe T? ReadAndroid<T>(TCardInstanceItem item, string name)
         where T : struct
     {
+        Il2CppThreadProbe.Check();
         var declaringClass = Il2CppClassPointerStore<TCardInstanceItem>.NativeClassPtr;
         if (declaringClass == IntPtr.Zero)
             throw new InvalidOperationException("Native board item class is not initialised.");

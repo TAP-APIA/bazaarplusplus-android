@@ -62,6 +62,7 @@ internal static class BppStaticDataAccess
     /// </summary>
     public static Dictionary<Guid, ITCard>? LoadCardMap(object? source)
     {
+        Il2CppThreadProbe.Check();
         if (source is not JsonGameDataManager manager)
             return null;
         try
