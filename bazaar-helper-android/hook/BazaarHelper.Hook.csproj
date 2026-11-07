@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>BazaarHelper.Hook</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AllowUnsafeBlocks>true</AllowUnsafeBlocks><EnableDefaultItems>true</EnableDefaultItems><GameInterop Condition="'$(GameInterop)'==''">../.local/game-interop</GameInterop></PropertyGroup>
+ <ItemGroup><Reference Include="../.local/managed/core/*.dll"><Private>false</Private></Reference><Reference Include="$(GameInterop)/*.dll"><Private>false</Private></Reference></ItemGroup>
+</Project>

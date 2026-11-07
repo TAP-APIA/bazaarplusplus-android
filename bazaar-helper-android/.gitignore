@@ -1,0 +1,11 @@
+.gradle/
+build/
+**/build/
+**/bin/
+**/obj/
+local.properties
+.keystore/
+.local/
+
+__pycache__/
+*.pyc
