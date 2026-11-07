@@ -3,7 +3,7 @@ name: bazaar-helper-android
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, feat/bazaar-helper-android]
     paths: ["bazaar-helper-android/**", ".github/workflows/bazaar-helper-android.yml"]
     tags: ["bazaar-helper-v*"]
 
