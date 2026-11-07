@@ -7,8 +7,9 @@ on:
     paths: ["bazaar-helper-android/**", ".github/workflows/bazaar-helper-android.yml"]
     tags: ["bazaar-helper-v*"]
 
+# Tag builds upload the APK to a release, so the token needs write access there.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: bazaar-helper-${{ github.ref }}
