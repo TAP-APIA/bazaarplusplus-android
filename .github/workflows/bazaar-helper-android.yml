@@ -32,11 +32,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-      - name: Install Android SDK packages
-        run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" \
-                     "ndk;27.0.12077973" "cmake;3.22.1" > /dev/null
+      # Installs cmdline-tools, exports ANDROID_HOME/ANDROID_SDK_ROOT and accepts SDK licences.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36 build-tools;36.0.0 ndk;27.0.12077973 cmake;3.22.1"
       - name: Cache pinned foundation
         uses: actions/cache@v4
         with:
@@ -78,8 +77,6 @@ jobs:
           test -s "$RUNNER_TEMP/release.jks"
       - name: Build and sign
         env:
-          # The runner image exports ANDROID_SDK_ROOT; build.py reads ANDROID_HOME.
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
           ANDROID_KEYSTORE: ${{ runner.temp }}/release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.BAZAAR_HELPER_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.BAZAAR_HELPER_KEY_PASSWORD }}
@@ -88,8 +85,6 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing BAZAAR_HELPER_KEYSTORE_PASSWORD"; exit 1; }
           python3 tools/build.py --interop .local/game-interop
       - name: Verify signature and scope
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           apk=$(ls build/BazaarHelper-*.apk | head -1)
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
