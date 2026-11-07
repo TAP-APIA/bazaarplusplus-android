@@ -23,8 +23,6 @@ jobs:
   apk:
     name: Build signed APK
     runs-on: ubuntu-24.04
-    env:
-      ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -80,6 +78,8 @@ jobs:
           test -s "$RUNNER_TEMP/release.jks"
       - name: Build and sign
         env:
+          # The runner image exports ANDROID_SDK_ROOT; build.py reads ANDROID_HOME.
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
           ANDROID_KEYSTORE: ${{ runner.temp }}/release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.BAZAAR_HELPER_KEYSTORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.BAZAAR_HELPER_KEY_PASSWORD }}
@@ -88,6 +88,8 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing BAZAAR_HELPER_KEYSTORE_PASSWORD"; exit 1; }
           python3 tools/build.py --interop .local/game-interop
       - name: Verify signature and scope
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
         run: |
           apk=$(ls build/BazaarHelper-*.apk | head -1)
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
