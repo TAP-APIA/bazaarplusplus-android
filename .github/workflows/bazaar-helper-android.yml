@@ -1,0 +1,109 @@
+name: bazaar-helper-android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths: ["bazaar-helper-android/**", ".github/workflows/bazaar-helper-android.yml"]
+    tags: ["bazaar-helper-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazaar-helper-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: bazaar-helper-android
+
+jobs:
+  apk:
+    name: Build signed APK
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" \
+                     "ndk;27.0.12077973" "cmake;3.22.1" > /dev/null
+      - name: Cache pinned foundation
+        uses: actions/cache@v4
+        with:
+          path: |
+            bazaar-helper-android/.local/nextbep
+            bazaar-helper-android/.local/foundation
+            bazaar-helper-android/.local/assets
+            bazaar-helper-android/.local/managed
+          key: bazaar-helper-foundation-${{ hashFiles('bazaar-helper-android/third-party/foundation.lock.json') }}
+      # Proxy assemblies generated from the installed game: reverse-engineered and proprietary,
+      # never committed, pulled from a private archive instead.
+      - name: Restore game interop
+        env:
+          INTEROP_URL: ${{ secrets.BAZAAR_HELPER_INTEROP_URL }}
+          INTEROP_TOKEN: ${{ secrets.BAZAAR_HELPER_INTEROP_TOKEN }}
+        run: |
+          if [ -z "$INTEROP_URL" ]; then
+            echo "::error::Missing secret BAZAAR_HELPER_INTEROP_URL (see bazaar-helper-android/README.md → CI 打包)"
+            exit 1
+          fi
+          curl -fsSL ${INTEROP_TOKEN:+-H "Authorization: Bearer $INTEROP_TOKEN"} "$INTEROP_URL" -o /tmp/game-interop.zip
+          mkdir -p .local/game-interop
+          unzip -q /tmp/game-interop.zip -d /tmp/interop
+          if [ -f /tmp/interop/BazaarGameShared.dll ]; then
+            cp -R /tmp/interop/. .local/game-interop/
+          else
+            cp -R /tmp/interop/game-interop/. .local/game-interop/
+          fi
+          test -f .local/game-interop/BazaarGameShared.dll
+      - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.BAZAAR_HELPER_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing secret BAZAAR_HELPER_KEYSTORE_BASE64 (see bazaar-helper-android/README.md → CI 打包)"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          test -s "$RUNNER_TEMP/release.jks"
+      - name: Build and sign
+        env:
+          ANDROID_KEYSTORE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.BAZAAR_HELPER_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.BAZAAR_HELPER_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.BAZAAR_HELPER_KEY_ALIAS }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "::error::Missing BAZAAR_HELPER_KEYSTORE_PASSWORD"; exit 1; }
+          python3 tools/build.py --interop .local/game-interop
+      - name: Verify signature and scope
+        run: |
+          apk=$(ls build/BazaarHelper-*.apk | head -1)
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+          python3 tools/check-apk.py "$apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bazaarhelper-apk
+          path: |
+            bazaar-helper-android/build/BazaarHelper-*.apk
+            bazaar-helper-android/build/build-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/bazaar-helper-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "BazaarHelper $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" build/BazaarHelper-*.apk build/build-manifest.json --clobber
