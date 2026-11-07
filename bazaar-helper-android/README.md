@@ -106,7 +106,7 @@ runner 需要 `platforms;android-36`、`build-tools;36.0.0`、`ndk;27.0.12077973
 | `BAZAAR_HELPER_KEYSTORE_PASSWORD` | keystore 口令 |
 | `BAZAAR_HELPER_KEY_PASSWORD` | key 口令（一般与 keystore 相同） |
 | `BAZAAR_HELPER_KEY_ALIAS` | 可选；库里有多个 key 时才需要，`keytool -list -v -keystore …` 第一行就是 |
-| `BAZAAR_HELPER_INTEROP_URL` | 游戏互操作 DLL 压缩包的直链（私有 release asset 或私有存储） |
+| `BAZAAR_HELPER_INTEROP_URL` | 游戏互操作 DLL 压缩包地址。私有 release 用 **API asset 地址**（`https://api.github.com/repos/<org>/<repo>/releases/assets/<id>`）——浏览器 `/releases/download/...` 形式不接受 token、会 404 |
 | `BAZAAR_HELPER_INTEROP_TOKEN` | 可选；访问上面的地址需要 Bearer token 时填 |
 
 游戏互操作 DLL 是游戏逆向产物，既不能进仓库也不会打进 APK，CI 从私有压缩包还原：
@@ -115,7 +115,7 @@ runner 需要 `platforms;android-36`、`build-tools;36.0.0`、`ndk;27.0.12077973
 cd .local && zip -qr /tmp/game-interop.zip game-interop
 ```
 
-压缩包里可以直接是 DLL，也可以带一层 `game-interop/` 目录，workflow 两种都认；缺少 `BazaarGameShared.dll` 会直接失败。
+压缩包里可以直接是 DLL，也可以带一层 `game-interop/` 目录，workflow 两种都认；缺少 `BazaarGameShared.dll` 会直接失败。私有 asset 需要 `BAZAAR_HELPER_INTEROP_TOKEN`（fine-grained PAT，Contents 只读）。
 
 ## 战斗计时
 
