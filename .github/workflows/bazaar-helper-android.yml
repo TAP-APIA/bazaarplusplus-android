@@ -46,7 +46,9 @@ jobs:
             bazaar-helper-android/.local/managed
           key: bazaar-helper-foundation-${{ hashFiles('bazaar-helper-android/third-party/foundation.lock.json') }}
       # Proxy assemblies generated from the installed game: reverse-engineered and proprietary,
-      # never committed, pulled from a private archive instead.
+      # never committed, pulled from a private release asset instead. For private repositories the
+      # browser download URL rejects tokens, so INTEROP_URL is the API asset URL and the Accept
+      # header makes it stream the bytes.
       - name: Restore game interop
         env:
           INTEROP_URL: ${{ secrets.BAZAAR_HELPER_INTEROP_URL }}
@@ -56,7 +58,9 @@ jobs:
             echo "::error::Missing secret BAZAAR_HELPER_INTEROP_URL (see bazaar-helper-android/README.md → CI 打包)"
             exit 1
           fi
-          curl -fsSL ${INTEROP_TOKEN:+-H "Authorization: Bearer $INTEROP_TOKEN"} "$INTEROP_URL" -o /tmp/game-interop.zip
+          curl -fsSL -H "Accept: application/octet-stream" \
+               ${INTEROP_TOKEN:+-H "Authorization: Bearer $INTEROP_TOKEN"} \
+               "$INTEROP_URL" -o /tmp/game-interop.zip
           mkdir -p .local/game-interop
           unzip -q /tmp/game-interop.zip -d /tmp/interop
           if [ -f /tmp/interop/BazaarGameShared.dll ]; then
