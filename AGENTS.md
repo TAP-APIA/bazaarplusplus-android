@@ -10,6 +10,7 @@ BazaarPlusPlus monorepo. The mod and the installer ship as one Product Release; 
 | Hero and build snapshots computed from Bundles | `bazaarplusplus-analyzer/` |
 | bazaarplusplus.com, Hero Analysis, the download page | `bazaarplusplus-site/` |
 | Product version, Payload Inventory, release pipeline | root `VERSION`, `release.mjs`, `release/`; read `docs/release.md` |
+| BazaarHelper Android app (launch, record, sync, its own CI) | `bazaar-helper-android/` |
 
 Cross-project terms (Product Release, Payload, Release Manifest, Bundle) are defined in `CONTEXT.md`.
 
