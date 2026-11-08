@@ -42,8 +42,8 @@ internal static class NativeBridge
         if (Save(stamp, JsonSerializer.Serialize(data)) != 1)
             throw new IOException("Capture was not persisted");
     }
-    internal static void Begin(string run, string? mode) => BeginRun(JsonSerializer.Serialize(new { runId = run, gameMode = mode }));
-    internal static void UpdateRun(string run, uint victories, uint losses, uint day) => BeginRun(JsonSerializer.Serialize(new { runId = run, victories, losses, finalDay = day }));
+    internal static void Begin(string run, string? mode, string? hero) => BeginRun(JsonSerializer.Serialize(new { runId = run, gameMode = mode, playerHero = hero }));
+    internal static void UpdateRun(string run, uint victories, uint losses, uint day, string? hero) => BeginRun(JsonSerializer.Serialize(new { runId = run, victories, losses, finalDay = day, playerHero = hero }));
     internal static void Complete(string run) => CompleteRun(run);
     internal static void Status(string status) => SetStatus(status);
 }
