@@ -162,18 +162,13 @@ public final class MainActivity extends Activity {
 
   private static Bitmap brand;
 
-  /** Launcher artwork, cropped to the badge inside the adaptive-icon canvas. */
+  /** Launcher artwork: the adaptive icon is flat, so the full-bleed background layer is the badge. */
   private Bitmap brandBitmap() {
     if (brand != null) return brand;
     try {
-      int id = getResources().getIdentifier("ic_launcher_foreground", "mipmap", getPackageName());
+      int id = getResources().getIdentifier("ic_launcher_background", "drawable", getPackageName());
       if (id == 0) return null;
-      Bitmap full = BitmapFactory.decodeResource(getResources(), id);
-      if (full == null) return null;
-      int side = Math.round(full.getWidth() * 0.82f);
-      brand =
-          Bitmap.createBitmap(
-              full, (full.getWidth() - side) / 2, (full.getHeight() - side) / 2, side, side);
+      brand = BitmapFactory.decodeResource(getResources(), id);
       return brand;
     } catch (Exception e) {
       Diag.e("ui", "brand icon decode failed", e);
