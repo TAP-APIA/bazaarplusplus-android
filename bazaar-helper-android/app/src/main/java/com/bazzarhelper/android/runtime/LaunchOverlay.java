@@ -61,7 +61,7 @@ final class LaunchOverlay {
 
   private static final String[] LABELS = {
     "启动预加载器",
-    "下载 Unity 运行依赖",
+    "准备 Unity 运行库",
     "分析游戏程序集",
     "生成游戏代理（IL2CPP 互操作）",
     "初始化插件加载器",
@@ -74,7 +74,7 @@ final class LaunchOverlay {
   /** Rough per-stage duration shown to the user; the clock below counts up, this only sets hope. */
   private static final String[] ESTIMATES = {
     "预计约 10 秒",
-    "预计约 1 分钟",
+    "预计 1 分钟内",
     "预计约 1 分钟",
     "预计约 1–2 分钟",
     "预计约 1 分钟",
