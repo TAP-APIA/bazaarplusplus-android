@@ -784,14 +784,14 @@ public final class MainActivity extends Activity {
       Diag.i("game", "launch blocked: offline");
       new Sheet(this, "启动游戏", "需要联网准备运行环境")
           .message(
-              "首次启动或游戏更新后，助手要下载 Unity 代理依赖（几 MB）才能运行。\n请先连接 Wi-Fi 或移动网络再启动。")
+              "这台游戏的 Unity 运行库需要联网下载（几 MB）才能继续准备。\n请先连接 Wi-Fi 或移动网络再启动。")
           .primary("知道了", null)
           .show();
       return;
     }
     StringBuilder body = new StringBuilder("首次启动或游戏更新后，助手要先准备运行环境：\n");
-    if (preview.downloads()) body.append("· 下载 Unity 代理依赖，几 MB，会消耗流量\n");
-    else if (preview.bundled) body.append("· 从安装包解出 Unity 代理依赖，无需联网\n");
+    if (preview.downloads()) body.append("· 下载 Unity 运行库，几 MB，会消耗流量\n");
+    else if (preview.bundled) body.append("· 使用安装包内置的 Unity 运行库，无需联网\n");
     if (preview.unpackRuntime) body.append("· 解包 BepInEx / .NET 运行时\n");
     if (preview.gameChanged) body.append("· 从当前游戏包提取元数据并重新生成代理\n");
     body.append("\n整个过程约 1–2 分钟，");

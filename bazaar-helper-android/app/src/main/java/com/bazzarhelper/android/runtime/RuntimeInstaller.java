@@ -124,10 +124,10 @@ public final class RuntimeInstaller {
       String bundled = bundledUnityLibs(c, base);
       if (bundled != null) {
         Diag.i("runtime", "unity libs from bundle: " + bundled + " for " + base);
-        progress.accept("解出 Unity 代理依赖…");
+        progress.accept("解出内置 Unity 运行库…");
         copy(c.getAssets().open("unity-libs/" + bundled + ".zip"), unityZip);
       } else {
-        progress.accept("下载 Unity 代理依赖（几 MB，建议 Wi-Fi）…");
+        progress.accept("下载 Unity 运行库（几 MB，建议 Wi-Fi）…");
         String chosen = base;
         try {
           copy(download("https://unity.bepinex.dev/libraries/" + chosen + ".zip"), unityZip);
@@ -158,7 +158,7 @@ public final class RuntimeInstaller {
     }
     if (!validUnityZip(unityZip)) {
       unityZip.delete();
-      throw new IOException("Unity 依赖下载不完整，请重试");
+      throw new IOException("Unity 运行库不完整，请重试");
     }
     File config = new File(bep, "config/BepInEx.cfg");
     String cfg = Streams.text(config);

@@ -78,7 +78,7 @@ python3 tools/build.py --interop /path/to/current/interop
 启动前先做只读检查 `RuntimeInstaller.preview()`，用和 `prepare()` 相同的 stamp 判断这次要不要干活：
 
 - `runtime.version` 不匹配 → 要解包 BepInEx / .NET 运行时；
-- `game.version` 与游戏 APK 指纹（路径 + 大小 + mtime）不一致 → 要提取游戏元数据并重新生成代理，同时必然要下 Unity 依赖；
+- `game.version` 与游戏 APK 指纹（路径 + 大小 + mtime）不一致 → 要提取游戏元数据并重新生成代理（Unity 运行库若已内置就不再下载）；
 - `BepInEx/unity-libs/<Unity 版本>.zip` 缺失或不是有效 zip → 安装包里有同版本内置副本就直接解出（无需联网），否则从 `unity.bepinex.dev` 下载几 MB。
 
 需要干活时才弹「先准备运行环境」面板：列出这次会做的事（下载依赖 / 解包运行时 / 重新生成代理），说明约 1–2 分钟、建议 Wi-Fi、保持前台，给「开始准备 / 取消」；环境已就绪时点「启动游戏」直接进游戏，不再打扰。若这次确实要联网下载（安装包里没有匹配的 Unity 基础库）而当前没有网络，直接提示先连网，不进入准备流程（避免下到一半失败）。准备过程中原来的进度面板照常显示真实阶段文案。
@@ -129,10 +129,10 @@ dotnet run --project tests/clock/ClockTests.csproj          # 11 项逻辑帧换
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=TimerOverlayTests python3 tools/test-device.py   # 28 项布局 / 拖拽 / 开关 / 格式
 ```
 
-SDK 构建产物 `build/BazaarHelper-0.1.4.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
+SDK 构建产物 `build/BazaarHelper-0.1.7.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
 
 ```sh
-adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.4.apk
+adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.7.apk
 adb -s DEVICE shell am start -n com.bazzarhelper.android/.ui.MainActivity
 ```
 
@@ -150,7 +150,7 @@ ADB_PORT=5037 ANDROID_SERIAL=emulator-5580 python3 tools/test-device.py
 # ExportTests（诊断压缩包）、LaunchNoticeTests（启动提示，会临时改 stamp 再还原）、
 # PrepareTests（真实准备，需网络）
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=LaunchNoticeTests python3 tools/test-device.py
-python3 tools/check-apk.py build/BazaarHelper-0.1.4.apk
+python3 tools/check-apk.py build/BazaarHelper-0.1.7.apk
 ```
 
 同步测试使用独立测试数据库与密钥别名，不写真实战绩或请求真实账号接口，覆盖 26 项断言：加密、v3 绑定、固定账号归属、匿名隔离、重复采集、不完整回执、内容变化、切号期间的迟到响应 / 401、多次离线退出、刷新响应丢失恢复、SQLite 重开与 JSON 指纹顺序。上传锁按数据库文件命名，测试库不会被应用后台同步的锁挡住。
