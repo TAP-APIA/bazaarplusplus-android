@@ -14,6 +14,9 @@ internal static class Recorder
 {
     internal static ManualLogSource Log = null!;
     private static string run = ""; private static Opening? opening; private static readonly HashSet<string> Settled = new();
+    // One player fight per run per day; the client keeps reporting PVPCombat after a fight settles.
+    private static readonly HashSet<string> RecordedDays = new();
+    private static string lastOpponentSources = "";
     private sealed record Opening(string Run, int Day, int Hour, string Hero, string Opponent, string? DataVersion, string? Etag, List<CardRecord> Cards);
     internal sealed class CardRecord
     {
@@ -46,6 +49,37 @@ internal static class Recorder
             get; set;
         }
     }
+    /// <summary>
+    /// The player behind a PvP fight: the message's own opponent first, then the game's SimPvpOpponent —
+    /// the same order the desktop recorder uses. Monster/PvE fights reuse the combat state without a
+    /// player opponent (the placeholder <see cref="EHero.Common"/> is the default enum value), so they
+    /// are skipped and only real player-vs-player battles are recorded and uploaded.
+    /// </summary>
+    private static SimPvpOpponent? PlayerOpponent(NetMessageGameSim message)
+    {
+        var state = message.Data.CurrentState?.PvpOpponent;
+        var sim = Data.SimPvpOpponent;
+        // Worth one line per change: if the client ever stops filling both, the export says why nothing
+        // is recorded instead of silently uploading monster fights.
+        string seen = $"state={(state == null ? "null" : state.Hero.ToString())}, sim={(sim == null ? "null" : sim.Hero.ToString())}";
+        if (seen != lastOpponentSources)
+        {
+            lastOpponentSources = seen;
+            Log.LogInfo("PvP opponent sources: " + seen);
+        }
+        if (Usable(state)) return state;
+        if (Usable(sim)) return sim;
+        Log.LogDebug("Skip non-player combat: no player opponent hero");
+        return null;
+    }
+
+    private static bool Usable(SimPvpOpponent? opponent) =>
+        opponent != null && opponent.Hero != EHero.Common;
+
+    /// <summary>Hero display name, or null for "no hero" — EHero.Common is the monster/placeholder value.</summary>
+    private static string? HeroName(EHero? hero) =>
+        hero == null || hero.Value == EHero.Common ? null : hero.Value.ToString();
+
     internal static void BlockPlayback()
     {
         opening = null;
@@ -83,6 +117,9 @@ internal static class Recorder
             NativeBridge.UpdateRun(run, progress.Victories, progress.Defeats, progress.Day);
         if (game.Data.CurrentState?.StateName == ERunState.PVPCombat)
         {
+            var opponent = PlayerOpponent(game);
+            if (opponent == null)
+                return;
             var cards = OpeningCards(game);
             if (cards.Count == 0)
                 return;
@@ -90,10 +127,13 @@ internal static class Recorder
 
             // Only managed immutable values survive the opening callback. Never retain native messages.
             int day = (int)(game.Data.Run?.Day ?? live?.Day ?? 0), hour = (int)(game.Data.Run?.Hour ?? live?.Hour ?? 0);
+            string fight = run + "|" + day;
             if (opening is { } previous && previous.Run == run && previous.Day == day && previous.Hour == hour)
                 return;
-            opening = new Opening(run, day, hour, live?.Player?.Hero.ToString() ?? "", game.Data.CurrentState.PvpOpponent?.Hero.ToString() ?? live?.Opponent?.Hero.ToString() ?? "", game.Data.Run?.DataVersion ?? live?.DataVersion?.ToString(), ReadEtag(), cards);
-            Log.LogInfo($"PvP opening: player={cards.Count(c => c.side == "player")}, opponent={cards.Count(c => c.side == "opponent")}");
+            if (day > 0 && !RecordedDays.Add(fight))
+                return;
+            opening = new Opening(run, day, hour, HeroName(live?.Player?.Hero) ?? "", opponent.Hero.ToString(), game.Data.Run?.DataVersion ?? live?.DataVersion?.ToString(), ReadEtag(), cards);
+            Log.LogInfo($"PvP opening: player={cards.Count(c => c.side == "player")}, opponent={cards.Count(c => c.side == "opponent")}, opponent hero={opponent.Hero}");
         }
         var state = game.Data.CurrentState?.StateName.ToString();
         if (state is "EndRunDefeat" or "EndRunVictory")
@@ -296,7 +336,7 @@ internal static class Recorder
                     recordedAt = DateTimeOffset.UtcNow.ToString("O"),
                     day = o.Day > 0 ? o.Day : (int)(Data.Run?.Day ?? 0),
                     hour = o.Hour,
-                    playerHero = Data.Run?.Player?.Hero.ToString() ?? o.Hero,
+                    playerHero = HeroName(Data.Run?.Player?.Hero) ?? o.Hero,
                     opponentHero = o.Opponent,
                     result = outcome,
                     durationMs = Math.Max(0, message.Data.Frames.Count - 1) * 50,
@@ -309,6 +349,9 @@ internal static class Recorder
         Settled.Add(id);
         if (Settled.Count > 256)
             Settled.Remove(Settled.First());
+        // The client re-sends CombatSim for the same fight with a fresh MessageId; keeping the opening
+        // alive made each resend look like a new battle (two or three records for one day).
+        opening = null;
         NativeBridge.Status($"已记录第 {o.Day} 天 PvP · 我方 {cards.Count(c => c.side == "player")} / 对手 {cards.Count(c => c.side == "opponent")} 张卡");
     }
     private static string? ReadEtag()
