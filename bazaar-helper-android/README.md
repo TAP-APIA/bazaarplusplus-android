@@ -59,12 +59,13 @@ python3 tools/build.py --interop /path/to/current/interop
 
 ## 图标
 
-桌面端（`bazaar-assistant/desktop/src-tauri/icons/icon.png`）的金框海盗徽章直接作为手机图标：自适应图标 108dp，徽章居中 82dp 并带轻微投影，背景层是从 `--ui-hero` 到 `--ui-bg` 的径向渐变，符合「72dp 安全区」约定，圆形与方圆遮罩下都不裁到金框主体。
+图标用设计侧提供的 flat 自适应图标资源（`bazaar-assistant-android-clean-v3`，已整套拷进 `app/src/main/res/`）：全部画面都在**满幅、不透明**的背景层里（432×432，没有外金框、没有预圆角，由系统遮罩裁切），前景层是空的透明图，另带 monochrome PNG 与五档传统 PNG。
 
-- 图层：`drawable/ic_launcher_background.xml`（矢量渐变）、`mipmap-*/ic_launcher_foreground.png`（mdpi…xxxhdpi 五档）、`drawable/ic_launcher_monochrome.xml`（主题图标用的望远镜剪影）。
-- `mipmap-anydpi-v26/ic_launcher(_round).xml` 只有前后景；`mipmap-anydpi-v33` 额外声明 `monochrome`，Android 13 主题图标生效，旧系统忽略。
-- 清单使用 `@mipmap/ic_launcher` 与 `@mipmap/ic_launcher_round`，不再引用旧的 `ic_helper` 位图。
-- 桌面图换新后重新生成前景层（macOS，CoreGraphics）：`swift tools/render-icon.swift`；只重写五档 `ic_launcher_foreground.png`，背景 / 单色层是 XML 不必重生成。
+- `drawable-nodpi/`：`ic_launcher_background.png`（满幅画面）、`ic_launcher_foreground.png`（透明）、`ic_launcher_monochrome.png`（Android 13 主题图标剪影）。
+- `mipmap-{mdpi..xxxhdpi}/ic_launcher(_round).png`：Android 7 及更早用的传统图标。
+- 背景不透明且满幅，所以启动器遮罩里不会出现"透明背景→深色/黑色底板"的黑边或接缝（早期版本就是因为背景透明被 MIUI 铺成黑底）。
+- 应用内首页标题左侧的徽章解码 `@drawable/ic_launcher_background`（前景层是空的）。
+- 图标资源由设计侧提供，仓库里直接保存 PNG/XML，没有生成脚本。
 
 ## 界面
 
@@ -134,10 +135,10 @@ dotnet run --project tests/clock/ClockTests.csproj          # 11 项逻辑帧换
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=TimerOverlayTests python3 tools/test-device.py   # 28 项布局 / 拖拽 / 开关 / 格式
 ```
 
-SDK 构建产物 `build/BazaarHelper-0.1.9.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
+SDK 构建产物 `build/BazaarHelper-0.1.10.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
 
 ```sh
-adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.9.apk
+adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.10.apk
 adb -s DEVICE shell am start -n com.bazzarhelper.android/.ui.MainActivity
 ```
 
@@ -155,7 +156,7 @@ ADB_PORT=5037 ANDROID_SERIAL=emulator-5580 python3 tools/test-device.py
 # ExportTests（诊断压缩包）、LaunchNoticeTests（启动提示，会临时改 stamp 再还原）、
 # PrepareTests（真实准备，需网络）
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=LaunchNoticeTests python3 tools/test-device.py
-python3 tools/check-apk.py build/BazaarHelper-0.1.9.apk
+python3 tools/check-apk.py build/BazaarHelper-0.1.10.apk
 ```
 
 同步测试使用独立测试数据库与密钥别名，不写真实战绩或请求真实账号接口，覆盖 26 项断言：加密、v3 绑定、固定账号归属、匿名隔离、重复采集、不完整回执、内容变化、切号期间的迟到响应 / 401、多次离线退出、刷新响应丢失恢复、SQLite 重开与 JSON 指纹顺序。上传锁按数据库文件命名，测试库不会被应用后台同步的锁挡住。
