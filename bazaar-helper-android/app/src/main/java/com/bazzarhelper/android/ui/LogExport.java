@@ -183,7 +183,7 @@ final class LogExport {
           + (Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode)
           + ")";
     } catch (Exception e) {
-      return "0.1.2";
+      return "未知版本";
     }
   }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SDK-only build: original source -> javac -> D8; pinned native framework -> CMake."""
-import os,pathlib,subprocess,shutil,sys,zipfile,json,hashlib,argparse
+import os,pathlib,re,subprocess,shutil,sys,zipfile,json,hashlib,argparse
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--interop',type=pathlib.Path,default=ROOT/'.local/game-interop');p.add_argument('--test',action='store_true');args=p.parse_args()
 SDK=pathlib.Path(os.environ.get('ANDROID_HOME',pathlib.Path.home()/'Library/Android/sdk'))
@@ -18,7 +18,7 @@ lib=BUILD/'native/arm64-v8a';shutil.copytree(ROOT/'.local/foundation/jniLibs/arm
 for name in ['main','nextbep']:shutil.copy2(nb/name/('lib'+name+'.so'),lib)
 clang=NDK/f'toolchains/llvm/prebuilt/{HOST}/bin/aarch64-linux-android29-clang++'
 run([clang,'-shared','-fPIC','-O2','-std=c++17','-static-libstdc++',ROOT/'app/src/main/cpp/bridge.cpp','-o',lib/'libhelperjni.so'])
-assets=BUILD/'assets';shutil.copytree(ROOT/'.local/assets',assets,dirs_exist_ok=True);shutil.copy2(ROOT/'hook/bin/Release/net10.0/BazaarHelper.Hook.dll',assets)
+assets=BUILD/'assets';shutil.rmtree(assets,ignore_errors=True);shutil.copytree(ROOT/'.local/assets',assets,dirs_exist_ok=True);shutil.copy2(ROOT/'hook/bin/Release/net10.0/BazaarHelper.Hook.dll',assets)
 res=BUILD/'compiled-res.zip';run([TOOLS/'aapt2','compile','--dir',ROOT/'app/src/main/res','-o',res])
 manifest=BUILD/'AndroidManifest.xml';manifest.write_text((ROOT/'app/src/main/AndroidManifest.xml').read_text().replace('<manifest ','<manifest package="com.bazzarhelper.android" ',1))
 unsigned=BUILD/'unsigned.apk';run([TOOLS/'aapt2','link','-o',unsigned,'--manifest',manifest,'-I',PLATFORM,'-R',res,'-A',assets,'--auto-add-overlay'])
@@ -44,7 +44,7 @@ alias_args=([] if env_key and not os.environ.get('ANDROID_KEY_ALIAS')
 if not key.exists():
     if env_key:raise SystemExit(f'ANDROID_KEYSTORE points at a missing file: {key}')
     run([JAVA/'bin/keytool','-genkeypair','-keystore',key,'-storepass',key_pass,'-keypass',alias_pass,'-alias',alias,'-keyalg','RSA','-keysize','2048','-validity','10000','-dname','CN=BazaarHelper Development'])
-aligned=BUILD/'aligned.apk';out=BUILD/'BazaarHelper-0.1.2.apk';run([TOOLS/'zipalign','-f','-p','4',unsigned,aligned]);run([TOOLS/'apksigner','sign','--ks',key,'--ks-pass','pass:'+key_pass,*alias_args,'--out',out,aligned],env={**os.environ,'JAVA_HOME':str(JAVA)})
+aligned=BUILD/'aligned.apk';version=re.search(r'android:versionName="([^"]+)"',manifest.read_text()).group(1);out=BUILD/('BazaarHelper-'+version+'.apk');run([TOOLS/'zipalign','-f','-p','4',unsigned,aligned]);run([TOOLS/'apksigner','sign','--ks',key,'--ks-pass','pass:'+key_pass,*alias_args,'--out',out,aligned],env={**os.environ,'JAVA_HOME':str(JAVA)})
 run([TOOLS/'apksigner','verify','--verbose',out],env={**os.environ,'JAVA_HOME':str(JAVA)})
 run(['python3',ROOT/'tools/check-apk.py',out])
 manifest={'apk':out.name,'sha256':hashlib.sha256(out.read_bytes()).hexdigest(),'package':'com.bazzarhelper.android','gameInterop':{f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(args.interop.glob('*.dll'))},'foundation':json.loads((ROOT/'third-party/foundation.lock.json').read_text())['commit']}

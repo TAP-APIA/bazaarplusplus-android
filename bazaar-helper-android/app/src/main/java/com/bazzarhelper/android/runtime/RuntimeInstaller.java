@@ -1,6 +1,7 @@
 package com.bazzarhelper.android.runtime;
 
 import android.content.*;
+import com.bazzarhelper.android.Diag;
 import android.content.pm.*;
 import java.io.*;
 import java.nio.file.*;
@@ -15,7 +16,7 @@ public final class RuntimeInstaller {
 
   /** What {@link #prepare} is about to do, so the UI can warn before a download starts. */
   public static final class Preview {
-    public boolean unpackRuntime, gameChanged, downloadUnity;
+    public boolean unpackRuntime, gameChanged, downloadUnity, bundled;
     public String unityVersion = "";
 
     public boolean needed() {
@@ -55,6 +56,10 @@ public final class RuntimeInstaller {
       String base = p.unityVersion.replaceAll("[a-z].*$", "");
       p.downloadUnity =
           !validUnityZip(new File(new File(root, "BepInEx/unity-libs"), base + ".zip"));
+      if (p.downloadUnity) {
+        p.bundled = bundledUnityLibs(c, base) != null;
+        p.downloadUnity = !p.bundled;
+      }
     } catch (Exception e) {
       p.unpackRuntime = true;
       p.downloadUnity = true;
@@ -116,32 +121,39 @@ public final class RuntimeInstaller {
     File unityZip = new File(libs, base + ".zip");
     if (!validUnityZip(unityZip)) {
       unityZip.delete();
-      progress.accept("下载 Unity 代理依赖（几 MB，建议 Wi-Fi）…");
-      String chosen = base;
-      try {
-        copy(download("https://unity.bepinex.dev/libraries/" + chosen + ".zip"), unityZip);
-      } catch (IOException exact) {
-        unityZip.delete();
-        String listing;
-        java.net.URLConnection conn =
-            new java.net.URL("https://unity.bepinex.dev/libraries/").openConnection();
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(20000);
-        try (InputStream in = conn.getInputStream()) {
-          listing =
-              new String(
-                  Streams.read(in, 4 * 1024 * 1024), java.nio.charset.StandardCharsets.UTF_8);
+      String bundled = bundledUnityLibs(c, base);
+      if (bundled != null) {
+        Diag.i("runtime", "unity libs from bundle: " + bundled + " for " + base);
+        progress.accept("解出 Unity 代理依赖…");
+        copy(c.getAssets().open("unity-libs/" + bundled + ".zip"), unityZip);
+      } else {
+        progress.accept("下载 Unity 代理依赖（几 MB，建议 Wi-Fi）…");
+        String chosen = base;
+        try {
+          copy(download("https://unity.bepinex.dev/libraries/" + chosen + ".zip"), unityZip);
+        } catch (IOException exact) {
+          unityZip.delete();
+          String listing;
+          java.net.URLConnection conn =
+              new java.net.URL("https://unity.bepinex.dev/libraries/").openConnection();
+          conn.setConnectTimeout(15000);
+          conn.setReadTimeout(20000);
+          try (InputStream in = conn.getInputStream()) {
+            listing =
+                new String(
+                    Streams.read(in, 4 * 1024 * 1024), java.nio.charset.StandardCharsets.UTF_8);
+          }
+          String prefix = base.substring(0, base.lastIndexOf('.') + 1);
+          int patch = Integer.parseInt(base.substring(base.lastIndexOf('.') + 1)), best = -1;
+          Matcher m = Pattern.compile(Pattern.quote(prefix) + "(\\d+)\\.zip").matcher(listing);
+          while (m.find()) {
+            int n = Integer.parseInt(m.group(1));
+            if (n <= patch) best = Math.max(best, n);
+          }
+          if (best < 0) throw exact;
+          chosen = prefix + best;
+          copy(download("https://unity.bepinex.dev/libraries/" + chosen + ".zip"), unityZip);
         }
-        String prefix = base.substring(0, base.lastIndexOf('.') + 1);
-        int patch = Integer.parseInt(base.substring(base.lastIndexOf('.') + 1)), best = -1;
-        Matcher m = Pattern.compile(Pattern.quote(prefix) + "(\\d+)\\.zip").matcher(listing);
-        while (m.find()) {
-          int n = Integer.parseInt(m.group(1));
-          if (n <= patch) best = Math.max(best, n);
-        }
-        if (best < 0) throw exact;
-        chosen = prefix + best;
-        copy(download("https://unity.bepinex.dev/libraries/" + chosen + ".zip"), unityZip);
       }
     }
     if (!validUnityZip(unityZip)) {
@@ -185,6 +197,20 @@ public final class RuntimeInstaller {
       }
     }
     throw new IOException("无法识别 Unity 版本");
+  }
+
+  /**
+   * Bundled Unity base libraries are stored under the game's Unity version, so this is an exact
+   * filename match and nothing else: a patch the game does not run is never substituted (that
+   * fallback stays in the download path, which mirrors BepInEx). Anything else returns null and
+   * prepare() downloads as before.
+   */
+  private static String bundledUnityLibs(Context c, String base) {
+    try {
+      for (String name : c.getAssets().list("unity-libs")) if (name.equals(base + ".zip")) return base;
+    } catch (IOException ignored) {
+    }
+    return null;
   }
 
   private static InputStream download(String url) throws IOException {
