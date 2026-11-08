@@ -133,7 +133,7 @@ internal static class Recorder
             if (day > 0 && !RecordedDays.Add(fight))
                 return;
             opening = new Opening(run, day, hour, HeroName(live?.Player?.Hero) ?? "", opponent.Hero.ToString(), game.Data.Run?.DataVersion ?? live?.DataVersion?.ToString(), ReadEtag(), cards);
-            Log.LogInfo($"PvP opening: player={cards.Count(c => c.side == "player")}, opponent={cards.Count(c => c.side == "opponent")}, opponent hero={opponent.Hero}");
+            Log.LogInfo($"PvP opening: player={cards.Count(c => c.side == "player")}, opponent={cards.Count(c => c.side == "opponent")}, opponent hero={opponent.Hero}, enchanted={cards.Count(c => c.side == "player" && c.zone == "items" && c.enchant != null)}");
         }
         var state = game.Data.CurrentState?.StateName.ToString();
         if (state is "EndRunDefeat" or "EndRunVictory")
@@ -180,7 +180,7 @@ internal static class Recorder
         catch { }
         var section = OptionalValue.Read<EInventorySection>(update?.Placement, "Section") ?? OptionalValue.Read<EInventorySection>(spawn, "Section") ?? OptionalValue.Read<EInventorySection>(live, "Section");
         var socket = OptionalValue.Read<EContainerSocketId>(update?.Placement, "Socket") ?? OptionalValue.Read<EContainerSocketId>(spawn, "Socket") ?? OptionalValue.Read<EContainerSocketId>(live, "LeftSocketId");
-        var card = new CardRecord { side = side == ECombatantId.Opponent ? "opponent" : "player", zone = type == ECardType.Skill ? "skills" : "items", instanceId = instance, templateId = string.IsNullOrEmpty(template) ? live?.TemplateId.ToString() ?? "" : template, name = live?.Template?.InternalName, tier = (OptionalValue.Read<ETier>(update, "Tier") ?? live?.Tier)?.ToString(), size = (OptionalValue.Read<ECardSize>(update, "Size") ?? live?.Size)?.ToString(), enchant = OptionalValue.Read<EEnchantmentType>(update, "Enchantment")?.ToString(), boardSection = section?.ToString(), socket = socket?.ToString(), position = socket.HasValue ? (int)socket.Value : 0 };
+        var card = new CardRecord { side = side == ECombatantId.Opponent ? "opponent" : "player", zone = type == ECardType.Skill ? "skills" : "items", instanceId = instance, templateId = string.IsNullOrEmpty(template) ? live?.TemplateId.ToString() ?? "" : template, name = live?.Template?.InternalName, tier = (OptionalValue.Read<ETier>(update, "Tier") ?? live?.Tier)?.ToString(), size = (OptionalValue.Read<ECardSize>(update, "Size") ?? live?.Size)?.ToString(), enchant = Enchantment(update, live)?.ToString(), boardSection = section?.ToString(), socket = socket?.ToString(), position = socket.HasValue ? (int)socket.Value : 0 };
         var attributes = new Dictionary<string, int>();
         if (update?.Attributes != null)
         {
@@ -218,6 +218,30 @@ internal static class Recorder
         if (live?.TryCast<SkillCard>() is { } skill)
             card.name = skill.Template?.Localization?.Title?.Text ?? card.name;
         return card;
+    }
+    private static bool enchantFallbackFailed;
+    /// <summary>
+    /// Enchantment arrives in the fight message for the opponent's board (there is no local card to read),
+    /// but the message never carries the player's own enchantments — SimUpdateCard leaves the field null for
+    /// cards the client already owns, so those only exist on the local ItemCard (same live-card path the
+    /// desktop recorder uses). Skills have no Enchantment member at all, so the read must tolerate a missing
+    /// member, and any other failure falls back to "no enchantment" instead of losing the battle.
+    /// </summary>
+    private static EEnchantmentType? Enchantment(SimUpdateCard? update, Card? live)
+    {
+        var fromMessage = OptionalValue.Read<EEnchantmentType>(update, "Enchantment");
+        if (fromMessage != null)
+            return fromMessage;
+        try { return OptionalValue.TryRead<EEnchantmentType>(live, "Enchantment"); }
+        catch (Exception error)
+        {
+            if (!enchantFallbackFailed)
+            {
+                enchantFallbackFailed = true;
+                Log.LogWarning("Live enchantment read failed: " + error.GetType().Name);
+            }
+            return null;
+        }
     }
     internal static void Settle(NetMessageCombatSim message)
     {

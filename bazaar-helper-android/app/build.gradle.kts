@@ -2,7 +2,7 @@ plugins { id("com.android.application") }
 android {
     namespace = "com.bazzarhelper.android"
     compileSdk = 36
-    defaultConfig { applicationId = "com.bazzarhelper.android"; minSdk = 29; targetSdk = 35; versionCode = 9; versionName = "0.1.10"; ndk { abiFilters += "arm64-v8a" } }
+    defaultConfig { applicationId = "com.bazzarhelper.android"; minSdk = 29; targetSdk = 35; versionCode = 10; versionName = "0.1.11"; ndk { abiFilters += "arm64-v8a" } }
     signingConfigs { getByName("debug") { storeFile = rootProject.file(".keystore/development.p12"); storePassword = "android"; keyAlias = "bazaarhelper"; keyPassword = "android" } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     sourceSets["main"].assets.srcDir(rootProject.file("build/assets"))

@@ -27,7 +27,7 @@
 | 最新安装包（GitHub） | https://github.com/dabazzar/BazaarHelperAndroid/releases/latest |
 | 全部版本记录 | https://github.com/dabazzar/BazaarHelperAndroid/releases |
 
-- 当前版本 **0.1.10**，要求 **Android 10+（minSdk 29）、arm64-v8a**，安装时需要允许「安装未知来源应用」
+- 当前版本 **0.1.11**，要求 **Android 10+（minSdk 29）、arm64-v8a**，安装时需要允许「安装未知来源应用」
 - 安装后需要与游戏同机运行，并用微信扫码绑定账号；未绑定时只能停在登录页
 
 ### 小程序

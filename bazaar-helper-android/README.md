@@ -27,6 +27,8 @@
 只上传规范化的双方棋盘、技能、属性、结算和指标；不保存原始游戏消息、录像或对手身份。
 网络失败与不完整回执保持待重试；成功内容指纹落盘后才确认上传，战绩默认私有。
 
+双方物品的附魔来源不同：对手的来自战斗消息里的卡牌更新（本地没有对手卡可读），我方的在消息里恒为空（`SimUpdateCard.Enchantment` 不随自己已有的卡下发），所以从本地 `ItemCard.Enchantment` 读取，与桌面端「有本地卡就读本地卡」的顺序一致；技能没有该成员，读取按「无附魔」处理。
+
 ## 构建
 
 要求 JDK 17、.NET SDK 10、Android SDK 36 / Build Tools 36.0.0、NDK 27.0.12077973、CMake 3.22.1；当前只生成 ARM64，最低 Android 10。
@@ -135,10 +137,10 @@ dotnet run --project tests/clock/ClockTests.csproj          # 11 项逻辑帧换
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=TimerOverlayTests python3 tools/test-device.py   # 28 项布局 / 拖拽 / 开关 / 格式
 ```
 
-SDK 构建产物 `build/BazaarHelper-0.1.10.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
+SDK 构建产物 `build/BazaarHelper-0.1.11.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
 
 ```sh
-adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.10.apk
+adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.11.apk
 adb -s DEVICE shell am start -n com.bazzarhelper.android/.ui.MainActivity
 ```
 
@@ -156,7 +158,7 @@ ADB_PORT=5037 ANDROID_SERIAL=emulator-5580 python3 tools/test-device.py
 # ExportTests（诊断压缩包）、LaunchNoticeTests（启动提示，会临时改 stamp 再还原）、
 # PrepareTests（真实准备，需网络）
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=LaunchNoticeTests python3 tools/test-device.py
-python3 tools/check-apk.py build/BazaarHelper-0.1.10.apk
+python3 tools/check-apk.py build/BazaarHelper-0.1.11.apk
 ```
 
 同步测试使用独立测试数据库与密钥别名，不写真实战绩或请求真实账号接口，覆盖 26 项断言：加密、v3 绑定、固定账号归属、匿名隔离、重复采集、不完整回执、内容变化、切号期间的迟到响应 / 401、多次离线退出、刷新响应丢失恢复、SQLite 重开与 JSON 指纹顺序。上传锁按数据库文件命名，测试库不会被应用后台同步的锁挡住。

@@ -35,4 +35,10 @@ internal static class OptionalValue
         }
         finally { IL2CPP.il2cpp_gchandle_free(handle); }
     }
+    /** Same as Read, but a type without that member (a skill has no Enchantment) reads as absent instead of throwing. */
+    internal static T? TryRead<T>(Il2CppObjectBase? obj, string property) where T : unmanaged
+    {
+        try { return Read<T>(obj, property); }
+        catch (MissingMemberException) { return null; }
+    }
 }
