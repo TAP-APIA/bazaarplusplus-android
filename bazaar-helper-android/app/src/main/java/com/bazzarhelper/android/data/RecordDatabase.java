@@ -23,7 +23,7 @@ public final class RecordDatabase extends SQLiteOpenHelper {
         context,
         new File(context.getNoBackupFilesDir(), name + ".sqlite").getAbsolutePath(),
         null,
-        3);
+        4);
     directory = context.getNoBackupFilesDir();
     cipher = new CredentialCipher(alias);
     setWriteAheadLoggingEnabled(true);
@@ -35,7 +35,7 @@ public final class RecordDatabase extends SQLiteOpenHelper {
     db.execSQL("CREATE TABLE sessions(stamp TEXT PRIMARY KEY,owner TEXT NOT NULL)");
     db.execSQL(
         "CREATE TABLE run_facts(id TEXT PRIMARY KEY,started TEXT NOT NULL,mode TEXT,ended"
-            + " TEXT,facts TEXT)");
+            + " TEXT,facts TEXT,hero TEXT,owner TEXT)");
     db.execSQL(
         "CREATE TABLE battles(owner TEXT NOT NULL,id TEXT NOT NULL,run_id TEXT NOT NULL,recorded"
             + " TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(owner,id))");
@@ -51,7 +51,7 @@ public final class RecordDatabase extends SQLiteOpenHelper {
       db.execSQL("ALTER TABLE run_facts ADD COLUMN facts TEXT");
       oldVersion = 2;
     }
-    if (oldVersion == 2 && newVersion == 3) {
+    if (oldVersion == 2 && newVersion >= 3) {
       // Battles recorded before the hook learned to tell monster/PvE fights apart carry the placeholder
       // hero EHero.Common; they are not player-vs-player and must never reach the uploader.
       // Only drop rows the server already acknowledged: anything still waiting to upload keeps its
@@ -62,6 +62,13 @@ public final class RecordDatabase extends SQLiteOpenHelper {
               "payload LIKE ? AND EXISTS(SELECT 1 FROM receipts r WHERE r.kind='battle' AND r.id=battles.id)",
               new String[] {"%\"opponentHero\":\"Common\"%"});
       com.bazzarhelper.android.Diag.i("db", "dropped " + removed + " uploaded non-player battles");
+      oldVersion = 3;
+    }
+    if (oldVersion == 3 && newVersion == 4) {
+      // A run is uploaded from its own row now, so it needs the hero shown before the first battle and
+      // the owner it belongs to (run_facts previously had neither).
+      db.execSQL("ALTER TABLE run_facts ADD COLUMN hero TEXT");
+      db.execSQL("ALTER TABLE run_facts ADD COLUMN owner TEXT");
       return;
     }
     throw new IllegalStateException("Unsupported database migration");
@@ -127,6 +134,20 @@ public final class RecordDatabase extends SQLiteOpenHelper {
         getReadableDatabase()
             .rawQuery(sql, run == null ? new String[] {owner} : new String[] {owner, run})) {
       while (c.moveToNext()) result.add(new JSONObject(c.getString(0)));
+    }
+    return result;
+  }
+
+  /** Runs to sync: those with battles for this owner plus runs stamped with it before their first fight. */
+  public List<String> runsForUpload(String owner) {
+    List<String> result = new ArrayList<>();
+    try (Cursor c =
+        getReadableDatabase()
+            .rawQuery(
+                "SELECT id FROM (SELECT run_id AS id FROM battles WHERE owner=? UNION"
+                    + " SELECT id FROM run_facts WHERE owner=?) GROUP BY id ORDER BY id",
+                new String[] {owner, owner})) {
+      while (c.moveToNext()) result.add(c.getString(0));
     }
     return result;
   }

@@ -36,11 +36,11 @@ public final class MainActivity extends Activity {
       loginTitle, loginBody, loginHint, loginCancel;
   private ChunkyButton accountAction, launch, resetPosition, historyButton, syncButton, qrLogin,
       exportButton;
-  private Switch timerSwitch;
+  private Switch timerSwitch, shareSwitch;
   private View gameDot;
   private Sheet qrSheet, progressSheet;
   private Bitmap qr;
-  private boolean active, launching, syncing, bindingTimer, working, pending;
+  private boolean active, launching, syncing, bindingTimer, bindingShare, working, pending;
 
   private SyncEngine engine() {
     return HelperApplication.engine();
@@ -474,6 +474,7 @@ public final class MainActivity extends Activity {
     page.addView(exportButton, exportParams);
     page.addView(footer());
     bindTimerSwitch();
+    bindShareSwitch();
   }
 
   private LinearLayout accountCard() {
@@ -500,6 +501,21 @@ public final class MainActivity extends Activity {
     actionParams.topMargin = Ui.dp(16);
     accountAction.setOnClickListener(v -> accountSheet());
     card.addView(accountAction, actionParams);
+
+    card.addView(Ui.divider(this));
+
+    LinearLayout shareRow = Ui.row(this);
+    LinearLayout shareText = Ui.column(this);
+    shareText.addView(Ui.text(this, "分享新战绩", 15, Ui.INK, Ui.strong()));
+    shareText.addView(Ui.spacer(this, 3));
+    shareText.addView(Ui.muted(this, "新开的局公开到社区，关闭只影响之后的对局"));
+    shareRow.addView(shareText, new LinearLayout.LayoutParams(0, -2, 1));
+    shareSwitch = new Switch(this);
+    shareSwitch.setContentDescription("分享新战绩");
+    shareSwitch.setThumbTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
+    shareSwitch.setTrackTintList(android.content.res.ColorStateList.valueOf(Ui.CHIP));
+    shareRow.addView(shareSwitch);
+    card.addView(shareRow);
     return card;
   }
 
@@ -648,6 +664,38 @@ public final class MainActivity extends Activity {
                 bindingTimer = true;
                 timerSwitch.setChecked(value);
                 bindingTimer = false;
+              });
+        });
+  }
+
+  private void bindShareSwitch() {
+    shareSwitch.setOnCheckedChangeListener(
+        (v, checked) -> {
+          if (bindingShare) return;
+          Diag.i("share", "new runs public=" + checked);
+          io.execute(
+              () -> {
+                try {
+                  engine().shareRuns(checked);
+                  HelperApplication.wake();
+                } catch (Exception ignored) {
+                }
+              });
+        });
+    io.execute(
+        () -> {
+          boolean enabled = true;
+          try {
+            enabled = engine().shareRuns();
+          } catch (Exception ignored) {
+          }
+          final boolean value = enabled;
+          runOnUiThread(
+              () -> {
+                if (shareSwitch == null) return;
+                bindingShare = true;
+                shareSwitch.setChecked(value);
+                bindingShare = false;
               });
         });
   }

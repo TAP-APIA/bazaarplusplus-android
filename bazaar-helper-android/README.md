@@ -21,6 +21,9 @@
 只上报玩家之间的对战：Hook 记录开局前先确认对手是玩家（消息里的 `PvpOpponent`，回退到游戏的 `Data.SimPvpOpponent`，与桌面端同一顺序），两者都拿不到或英雄是占位值 `EHero.Common` 时视为怪物 / PvE 并跳过；同一 run 的同一自然日只记录一场，结算后立刻清空开局快照，避免客户端重发 `CombatSim` 造成一天多条。
 
 真实 PvP 在结算时固定归属；未绑定时的本地记录不会在后续绑定时认领。切号不能转移历史战绩。
+
+一局在上传端从开局就存在：Hook 在 `NetMessageRunInitialized` 时就把 runId / 模式 / 玩家英雄交给应用，应用存进 `run_facts`（含归属账号），同步时把「本账号名下还没有战绩的局」也一起上传，所以第一场战斗之前小程序就能看到并分享这一局。「分享新战绩」开关在账号卡片里，默认打开（与桌面端默认一致），值存在数据库 `shareRuns` 并随每次上传写进 `shareEnabled`；`completedAt` 与桌面端一致：这一局只要已经有一场战斗，就用最后一场战斗的时间填 `completedAt`（桌面端 `main.tsx` 也是这么传的），所以进行中的局也满足小程序「发布到社区」与服务端发布的前置条件，并且会像桌面端一样在进行中就出现在需要 completedAt 的列表里。关闭开关只影响之后新开的局：服务端的 public 标记是单向的，已公开的局不会因此取消。
+
 只上传规范化的双方棋盘、技能、属性、结算和指标；不保存原始游戏消息、录像或对手身份。
 网络失败与不完整回执保持待重试；成功内容指纹落盘后才确认上传，战绩默认私有。
 
@@ -131,10 +134,10 @@ dotnet run --project tests/clock/ClockTests.csproj          # 11 项逻辑帧换
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=TimerOverlayTests python3 tools/test-device.py   # 28 项布局 / 拖拽 / 开关 / 格式
 ```
 
-SDK 构建产物 `build/BazaarHelper-0.1.8.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
+SDK 构建产物 `build/BazaarHelper-0.1.9.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
 
 ```sh
-adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.8.apk
+adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.9.apk
 adb -s DEVICE shell am start -n com.bazzarhelper.android/.ui.MainActivity
 ```
 
@@ -152,7 +155,7 @@ ADB_PORT=5037 ANDROID_SERIAL=emulator-5580 python3 tools/test-device.py
 # ExportTests（诊断压缩包）、LaunchNoticeTests（启动提示，会临时改 stamp 再还原）、
 # PrepareTests（真实准备，需网络）
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=LaunchNoticeTests python3 tools/test-device.py
-python3 tools/check-apk.py build/BazaarHelper-0.1.8.apk
+python3 tools/check-apk.py build/BazaarHelper-0.1.9.apk
 ```
 
 同步测试使用独立测试数据库与密钥别名，不写真实战绩或请求真实账号接口，覆盖 26 项断言：加密、v3 绑定、固定账号归属、匿名隔离、重复采集、不完整回执、内容变化、切号期间的迟到响应 / 401、多次离线退出、刷新响应丢失恢复、SQLite 重开与 JSON 指纹顺序。上传锁按数据库文件命名，测试库不会被应用后台同步的锁挡住。

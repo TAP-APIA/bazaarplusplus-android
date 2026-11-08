@@ -107,14 +107,14 @@ internal static class Recorder
                 opening = null;
                 run = initialized.RunId;
             }
-            NativeBridge.Begin(run, initialized.PlayMode);
+            NativeBridge.Begin(run, initialized.PlayMode, HeroName(Data.Run?.Player?.Hero));
             return;
         }
         var game = message.TryCast<NetMessageGameSim>();
         if (game == null || string.IsNullOrWhiteSpace(run))
             return;
         if (game.Data.Run is { } progress)
-            NativeBridge.UpdateRun(run, progress.Victories, progress.Defeats, progress.Day);
+            NativeBridge.UpdateRun(run, progress.Victories, progress.Defeats, progress.Day, HeroName(Data.Run?.Player?.Hero));
         if (game.Data.CurrentState?.StateName == ERunState.PVPCombat)
         {
             var opponent = PlayerOpponent(game);

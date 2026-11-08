@@ -133,15 +133,27 @@ public final class SyncEngine {
   public void beginRun(JSONObject data) throws Exception {
     String id = data.getString("runId");
     validId(id);
+    String hero = data.optString("playerHero", "");
+    if ("null".equals(hero)) hero = "";
+    String owner = "";
+    try {
+      owner = db.session().optString("owner", "");
+    } catch (Exception ignored) {
+    }
     db.getWritableDatabase()
         .execSQL(
-            "INSERT INTO run_facts(id,started,mode,facts) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE"
-                + " SET mode=COALESCE(excluded.mode,mode),facts=COALESCE(excluded.facts,facts)",
+            "INSERT INTO run_facts(id,started,mode,facts,hero,owner) VALUES(?,?,?,?,?,?)"
+                + " ON CONFLICT(id) DO UPDATE SET mode=COALESCE(excluded.mode,mode),"
+                + " facts=COALESCE(excluded.facts,facts),"
+                + " hero=COALESCE(NULLIF(excluded.hero,''),hero),"
+                + " owner=COALESCE(NULLIF(excluded.owner,''),owner)",
             new Object[] {
               id,
               Instant.now().toString(),
               data.optString("gameMode", null),
-              data.has("victories") ? select(data, "victories losses finalDay").toString() : null
+              data.has("victories") ? select(data, "victories losses finalDay").toString() : null,
+              hero,
+              owner
             });
   }
 
@@ -246,10 +258,17 @@ public final class SyncEngine {
               });
         }
         rotateIfDue(s);
-        for (String run : db.runIds(owner)) {
+        for (String run : db.runsForUpload(owner)) {
           if (!db.isCurrent(s)) return;
           List<JSONObject> battles = db.records(owner, run);
-          JSONObject summary = summarize(run, battles);
+          JSONObject summary;
+          try {
+            summary = summarize(run, battles);
+          } catch (Exception broken) {
+            // One unreadable run must not stop the others from syncing.
+            Diag.e("sync", "run summary failed · " + run, broken);
+            continue;
+          }
           upload(s, "run", run, summary);
           for (JSONObject b : battles) {
             if (!db.isCurrent(s)) return;
@@ -346,41 +365,60 @@ public final class SyncEngine {
     }
   }
 
+  /** Whether new runs are published to the community: on by default, like the desktop client. */
+  public boolean shareRuns() {
+    return !"false".equals(db.get("shareRuns", "true"));
+  }
+
+  public void shareRuns(boolean enabled) {
+    db.put("shareRuns", enabled ? "true" : "false");
+  }
+
   private JSONObject summarize(String run, List<JSONObject> records) throws Exception {
-    JSONObject last = records.get(records.size() - 1),
-        b = last.getJSONObject("detail").getJSONObject("battle");
+    JSONObject last = records.isEmpty() ? null : records.get(records.size() - 1),
+        b = last == null ? null : last.getJSONObject("detail").getJSONObject("battle");
     int wins = 0, losses = 0;
     for (JSONObject e : records)
       if ("win".equals(e.getJSONObject("detail").getJSONObject("battle").getString("result")))
         wins++;
       else losses++;
+    // A run exists from its first message, so the mini program can show and share it while the first
+    // fight is still ahead; the desktop client behaves the same way. Sharing new runs is on by default
+    // there, so the flag matches it.
     JSONObject r =
         new JSONObject()
             .put("runId", run)
-            .put("hero", b.optString("playerHero"))
             .put("victories", wins)
             .put("losses", losses)
-            .put("finalDay", b.optInt("day"))
-            .put("shareEnabled", false)
+            .put("shareEnabled", shareRuns())
             .put("sharePolicyVersion", 1);
+    if (b != null) r.put("hero", b.optString("playerHero")).put("finalDay", b.optInt("day"));
     try (Cursor c =
         db.getReadableDatabase()
             .rawQuery(
-                "SELECT started,mode,ended,facts FROM run_facts WHERE id=?", new String[] {run})) {
+                "SELECT started,mode,ended,facts,hero FROM run_facts WHERE id=?",
+                new String[] {run})) {
       if (c.moveToFirst()) {
         r.put("startedAt", c.getString(0)).put("gameMode", c.getString(1));
+        if (!r.has("hero") && !c.isNull(4) && !c.getString(4).isEmpty())
+          r.put("hero", c.getString(4));
         if (!c.isNull(3)) {
           JSONObject facts = new JSONObject(c.getString(3));
           for (String key : new String[] {"victories", "losses", "finalDay"})
             if (facts.has(key)) r.put(key, facts.get(key));
         }
-        if (!c.isNull(2))
-          r.put("completedAt", c.getString(2))
-              .put("result", r.optInt("victories") >= 10 ? "win" : "loss");
+        if (!c.isNull(2)) r.put("result", r.optInt("victories") >= 10 ? "win" : "loss");
+        if (!c.isNull(2) && b == null) r.put("completedAt", c.getString(2));
       }
     }
-    for (String key : new String[] {"dataVersion", "gameDataEtag", "dataVersionSource"})
-      if (last.has(key)) r.put(key, last.get(key));
+    // Desktop parity: while a run still has fights ahead it already reports completedAt as the latest
+    // battle's timestamp, and that single field is what the mini program gates "发布到社区" on and what
+    // the server checks before publishing. Without it an in-progress run can never be published, which
+    // is why only the final day used to show the button.
+    if (b != null) r.put("completedAt", b.optString("recordedAt"));
+    if (last != null)
+      for (String key : new String[] {"dataVersion", "gameDataEtag", "dataVersionSource"})
+        if (last.has(key)) r.put(key, last.get(key));
     return r;
   }
 
