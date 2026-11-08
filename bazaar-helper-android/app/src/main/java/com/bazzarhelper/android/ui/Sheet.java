@@ -118,23 +118,28 @@ final class Sheet {
   }
 
   Sheet primary(String label, Runnable action) {
-    return action(ChunkyButton.primary(host).label(label), action);
+    return action(ChunkyButton.primary(host).label(label), action, true);
+  }
+
+  /** Like {@link #primary} but the sheet stays up, for actions that report back in place. */
+  Sheet primaryStaysOpen(String label, Runnable action) {
+    return action(ChunkyButton.primary(host).label(label), action, false);
   }
 
   Sheet secondary(String label, Runnable action) {
-    return action(ChunkyButton.secondary(host).label(label), action);
+    return action(ChunkyButton.secondary(host).label(label), action, true);
   }
 
   Sheet danger(String label, Runnable action) {
-    return action(ChunkyButton.danger(host).label(label), action);
+    return action(ChunkyButton.danger(host).label(label), action, true);
   }
 
-  private Sheet action(ChunkyButton button, Runnable action) {
+  private Sheet action(ChunkyButton button, Runnable action, boolean close) {
     LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
     p.topMargin = Ui.dp(10);
     button.setOnClickListener(
         v -> {
-          dismiss();
+          if (close) dismiss();
           if (action != null) action.run();
         });
     actionArea.addView(button, p);

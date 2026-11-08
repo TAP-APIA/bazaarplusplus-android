@@ -1,0 +1,14 @@
+{
+  "note": "Unity base libraries shipped inside the APK. A bundled copy is used only when the game's Unity version matches entry.game exactly (RuntimeInstaller.bundledUnityLibs); any other version still downloads. Add one entry per Unity line/version the game actually ships, and drop the old ones so the APK does not accumulate duplicates.",
+  "source": "https://unity.bepinex.dev/libraries/{version}.zip",
+  "entries": [
+    {
+      "game": "6000.3.27",
+      "version": "6000.3.26",
+      "sha256": "79fa3418f0b193ad0ff93315f98ad30abead7800face9624626a360ef5311ec4",
+      "bytes": 3048499,
+      "files": 78,
+      "why": "The Bazaar 安卓包是 Unity 6000.3.27f2；unity.bepinex.dev 最高只到 6000.3.26，BepInEx 自己的下载路径同样回退到这一版，所以内置的必须和它一致。"
+    }
+  ]
+}

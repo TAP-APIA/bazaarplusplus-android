@@ -27,7 +27,6 @@ import org.json.*;
  * owns this device, because every record is attributed to that account at settlement.
  */
 public final class MainActivity extends Activity {
-  private static final String WECHAT = "com.tencent.mm";
 
   private final ExecutorService io = Executors.newSingleThreadExecutor();
   private final Handler handler = new Handler(Looper.getMainLooper());
@@ -36,12 +35,11 @@ public final class MainActivity extends Activity {
   private TextView accountName, accountState, accountPill, gameState, recordPill, syncState,
       loginTitle, loginBody, loginHint, loginCancel;
   private ChunkyButton accountAction, launch, resetPosition, historyButton, syncButton, qrLogin,
-      wechatLogin, exportButton;
+      exportButton;
   private Switch timerSwitch;
   private View gameDot;
   private Sheet qrSheet, progressSheet;
   private Bitmap qr;
-  private String deeplink = "";
   private boolean active, launching, syncing, bindingTimer, working, pending;
 
   private SyncEngine engine() {
@@ -97,7 +95,6 @@ public final class MainActivity extends Activity {
                       if (boundNow) {
                         pending = false;
                         qr = null;
-                        deeplink = "";
                         if (qrSheet != null) qrSheet.dismiss();
                         Diag.i("login", "confirmed");
                         toast("微信绑定完成");
@@ -184,6 +181,14 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private String versionName() {
+    try {
+      return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+    } catch (Exception e) {
+      return "";
+    }
+  }
+
   private View header() {
     LinearLayout row = Ui.row(this);
     int markSize = Ui.dp(46);
@@ -210,7 +215,8 @@ public final class MainActivity extends Activity {
     titles.addView(Ui.spacer(this, 3));
     titles.addView(Ui.title(this, "大巴扎助手", 26, Ui.INK));
     row.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
-    row.addView(Ui.pill(this, "v0.1.2", Ui.ACCENT));
+    String version = versionName();
+    row.addView(Ui.pill(this, version.isEmpty() ? "—" : "v" + version, Ui.ACCENT));
 
     LinearLayout header = Ui.column(this);
     header.setPadding(0, Ui.dp(2), 0, Ui.dp(16));
@@ -241,14 +247,8 @@ public final class MainActivity extends Activity {
     qrParams.topMargin = Ui.dp(18);
     card.addView(qrLogin, qrParams);
 
-    wechatLogin = ChunkyButton.secondary(this).label("微信登录");
-    wechatLogin.setOnClickListener(v -> loginWechat());
-    LinearLayout.LayoutParams wechatParams = new LinearLayout.LayoutParams(-1, -2);
-    wechatParams.topMargin = Ui.dp(10);
-    card.addView(wechatLogin, wechatParams);
-
     LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
-    hintParams.topMargin = Ui.dp(12);
+    hintParams.topMargin = Ui.dp(14);
     loginHint = Ui.muted(this, "");
     card.addView(loginHint, hintParams);
 
@@ -293,12 +293,11 @@ public final class MainActivity extends Activity {
             ? "在微信里完成确认后会自动进入助手。小程序码 5 分钟内有效。"
             : "战绩只属于绑定的微信账号，绑定后自动同步到小程序。");
     qrLogin.label(waiting ? (qr == null ? "重新获取二维码" : "显示二维码") : "微信扫码登录");
-    wechatLogin.label(waiting ? "重新唤起微信" : "微信登录");
     loginCancel.setVisibility(waiting ? View.VISIBLE : View.GONE);
     loginHint.setText(
         waiting
             ? "没有看到微信页面？点「显示二维码」保存后用微信「扫一扫 → 相册」识别。"
-            : "「微信登录」会尝试直接打开小程序，打不开时用扫码。");
+            : "生成的小程序码可存到相册，再用微信「扫一扫 → 右上角相册」识别。");
   }
 
   private void cancelLogin() {
@@ -312,7 +311,6 @@ public final class MainActivity extends Activity {
               () -> {
                 pending = false;
                 qr = null;
-                deeplink = "";
                 refreshLogin();
               });
         });
@@ -327,27 +325,12 @@ public final class MainActivity extends Activity {
     requestSession(
         result -> {
           pending = true;
-          deeplink = result.optString("deeplink", "");
           qr = decode(result.optString("qrCode", ""));
           refreshLogin();
           if (qr == null) error("小程序码解析失败，请重试");
           else showQrSheet();
         },
         "正在生成小程序码");
-  }
-
-  private void loginWechat() {
-    if (working) return;
-    requestSession(
-        result -> {
-          pending = true;
-          deeplink = result.optString("deeplink", "");
-          if (qr == null) qr = decode(result.optString("qrCode", ""));
-          refreshLogin();
-          if (!deeplink.isEmpty()) openDeeplink();
-          else noDeeplink();
-        },
-        "正在请求微信登录");
   }
 
   private void requestSession(Consumer<JSONObject> onReady, String title) {
@@ -379,7 +362,9 @@ public final class MainActivity extends Activity {
                   error(message == null ? "登录未完成，请重试" : message);
                   return;
                 }
-                Diag.i("login", "session ready · deeplink " + (ready.optString("deeplink").isEmpty() ? "missing" : "present"));
+                Diag.i(
+                    "login",
+                    "session ready · qr " + (ready.optString("qrCode").isEmpty() ? "missing" : "present"));
                 onReady.accept(ready);
               });
         });
@@ -388,7 +373,6 @@ public final class MainActivity extends Activity {
   private void setLoginBusy(boolean busy) {
     if (qrLogin == null) return;
     qrLogin.setEnabled(!busy);
-    wechatLogin.setEnabled(!busy);
   }
 
   private void showProgress(String title, String message) {
@@ -398,7 +382,7 @@ public final class MainActivity extends Activity {
     bar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
     bar.setLayoutParams(new LinearLayout.LayoutParams(-1, Ui.dp(6)));
     progressSheet =
-        new Sheet(this, "微信登录", title).message(message).body(bar).cancelable(false);
+        new Sheet(this, "登录微信账号", title).message(message).body(bar).cancelable(false);
     progressSheet.show();
   }
 
@@ -427,14 +411,14 @@ public final class MainActivity extends Activity {
     image.setLayoutParams(new LinearLayout.LayoutParams(-1, Ui.dp(300)));
     qrSheet =
         new Sheet(this, "微信扫码登录", "用微信识别小程序码")
-            .message("点「保存并打开微信」，再到微信「扫一扫 → 右上角相册」选择刚保存的图片。也可以用另一台设备直接扫码。")
+            .message("点「保存到相册」，再到微信「扫一扫 → 右上角相册」选择刚保存的图片；也可以直接用另一台设备扫码。")
             .body(image)
-            .primary("保存并打开微信", this::saveAndOpenWechat)
+            .primaryStaysOpen("保存到相册", this::saveQrToAlbum)
             .secondary("关闭", null);
     qrSheet.show();
   }
 
-  private void saveAndOpenWechat() {
+  private void saveQrToAlbum() {
     if (qr == null) {
       error("小程序码已失效，请重新获取");
       return;
@@ -469,42 +453,9 @@ public final class MainActivity extends Activity {
                   error(message);
                   return;
                 }
-                toast("小程序码已存到相册");
-                launchWechat();
+                toast("已保存到相册，可用微信「扫一扫 → 相册」识别");
               });
         });
-  }
-
-  private void openDeeplink() {
-    try {
-      startActivity(
-          new Intent(Intent.ACTION_VIEW, Uri.parse(deeplink))
-              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-      refreshLogin();
-    } catch (Exception e) {
-      noDeeplink();
-    }
-  }
-
-  private void noDeeplink() {
-    new Sheet(this, "微信登录", "无法直接打开微信小程序")
-        .message("微信没有给这个小程序开放直达链接，只能扫码。已改用扫码登录：保存小程序码后在微信「扫一扫 → 相册」里识别。")
-        .primary("改用扫码登录", this::loginQr)
-        .secondary("关闭", null)
-        .show();
-  }
-
-  private void launchWechat() {
-    Intent intent = getPackageManager().getLaunchIntentForPackage(WECHAT);
-    if (intent == null) {
-      error("没有找到微信，请先安装微信客户端");
-      return;
-    }
-    try {
-      startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-    } catch (Exception e) {
-      error("无法打开微信，请手动启动");
-    }
   }
 
   // ---- home ----
@@ -814,7 +765,6 @@ public final class MainActivity extends Activity {
           runOnUiThread(
               () -> {
                 qr = null;
-                deeplink = "";
                 pending = false;
                 toast(result);
                 screen = "";
@@ -841,12 +791,15 @@ public final class MainActivity extends Activity {
     }
     StringBuilder body = new StringBuilder("首次启动或游戏更新后，助手要先准备运行环境：\n");
     if (preview.downloads()) body.append("· 下载 Unity 代理依赖，几 MB，会消耗流量\n");
+    else if (preview.bundled) body.append("· 从安装包解出 Unity 代理依赖，无需联网\n");
     if (preview.unpackRuntime) body.append("· 解包 BepInEx / .NET 运行时\n");
     if (preview.gameChanged) body.append("· 从当前游戏包提取元数据并重新生成代理\n");
-    body.append("\n整个过程约 1–2 分钟，建议在 Wi-Fi 下进行并保持游戏在前台。准备好之后的启动会快很多。");
+    body.append("\n整个过程约 1–2 分钟，");
+    body.append(preview.downloads() ? "建议在 Wi-Fi 下进行并保持游戏在前台。" : "请保持游戏在前台。");
+    body.append("准备好之后的启动会快很多。");
     Diag.i(
         "game",
-        "launch needs preparation · download=" + preview.downloads() + " gameChanged=" + preview.gameChanged);
+        "launch needs preparation · download=" + preview.downloads() + " bundled=" + preview.bundled + " gameChanged=" + preview.gameChanged);
     new Sheet(this, "启动游戏", "先准备运行环境")
         .message(body.toString())
         .primary("开始准备", this::beginLaunch)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fetch only the pinned generic native/runtime foundation; never copy a launcher DEX or BPP."""
-import hashlib,json,pathlib,subprocess,shutil,zipfile,os
+import hashlib,json,pathlib,subprocess,shutil,zipfile,os,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 PIN='44e1e59c40e6f52df45139db2c86ad4499d2881d'
 repo=ROOT/'.local/nextbep';repo.parent.mkdir(exist_ok=True)
@@ -39,4 +39,23 @@ lock={'repository':'https://github.com/NextBep/BepInEx.Android.Launcher','commit
 lockpath=ROOT/'third-party/foundation.lock.json'
 if lockpath.exists():assert json.loads(lockpath.read_text())==lock,'Pinned dependency content changed'
 else:lockpath.write_text(json.dumps(lock,indent=2)+'\n')
+# Unity base libraries ride inside the APK (third-party/unity-libs.json) so the first launch never
+# has to fetch them; pin the bytes exactly like every other build input.
+pin=json.loads((ROOT/'third-party/unity-libs.json').read_text())
+unity=assets/'unity-libs';unity.mkdir(exist_ok=True)
+# Shipped under the game's Unity version so the runtime lookup is an exact filename match.
+wanted={item['game']+'.zip' for item in pin['entries']}
+for stale in unity.glob('*.zip'):
+    if stale.name not in wanted:stale.unlink();print('Dropped stale Unity base libraries',stale.name)
+proxy=os.getenv('HTTPS_PROXY')
+opener=urllib.request.build_opener(urllib.request.ProxyHandler({'https':proxy,'http':proxy})) if proxy else urllib.request.build_opener()
+for item in pin['entries']:
+    target=unity/(item['game']+'.zip')
+    if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest()==item['sha256']:continue
+    url=pin['source'].replace('{version}',item['version']);tmp=target.with_name(target.name+'.tmp')
+    # unity.bepinex.dev rejects Python's default user agent (403), so identify ourselves.
+    req=urllib.request.Request(url,headers={'User-Agent':'BazaarHelper-build'})
+    with opener.open(req,timeout=600) as r,open(tmp,'wb') as f:shutil.copyfileobj(r,f)
+    assert hashlib.sha256(tmp.read_bytes()).hexdigest()==item['sha256'],'Unity base libraries changed: '+url
+    tmp.replace(target);print('Fetched Unity base libraries',item['version'],'as',target.name)
 print('Verified generic foundation',PIN,'(no upstream app Java/DEX)')

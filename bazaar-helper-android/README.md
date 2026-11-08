@@ -46,10 +46,9 @@ python3 tools/build.py --interop /path/to/current/interop
 
 未绑定微信时只能看到登录页，首页（启动游戏 / 计时器 / 战绩 / 同步）在绑定成功前不构建，因为每条战绩在结算时就要固定归属。账号管理里退出会立即回到登录页。
 
-两个入口：
+目前只有一个入口：**微信扫码登录**。向服务器申请一次性绑定会话，期间显示不可取消的加载面板（服务器要现场调用微信接口生成小程序码），成功后弹出小程序码。主按钮「保存到相册」把码写进相册（不自动跳转微信，弹窗保持打开，可反复保存），再到微信「扫一扫 → 右上角相册」选择该图确认——单机也能完成；也可以直接用另一台设备扫码。
 
-- **微信扫码登录**：向服务器申请一次性绑定会话，期间显示不可取消的加载面板（服务器要现场调用微信接口生成小程序码），成功后弹出小程序码。主按钮「保存并打开微信」把码存进相册并唤起微信，再到微信「扫一扫 → 右上角相册」选择该图确认——单机也能完成；也可以直接用另一台设备扫码。
-- **微信登录**：同样申请会话，然后用 API 返回的 `deeplink`（`ACTION_VIEW`）直接跳转。服务器侧用 `wxa/generate_urllink` 生成 URL Link 作为该字段；当前小程序主体没有 URL Scheme / URL Link 权限（微信返回 85407），所以字段为空，客户端会明确提示并一键切到扫码，权限开通后无需再改客户端。函数实例内会记住这个失败，避免每次登录都多打一次上游请求。
+早先还有一条「微信登录」直达入口（读 API 的 `deeplink`，服务器侧用 `wxa/generate_urllink` 生成 URL Link）。小程序主体没有 URL Scheme / URL Link 权限（微信返回 85407），该字段一直为空，只能失败后再引导去扫码，按用户要求移除，客户端不再读取 `deeplink`。
 
 会话未确认前登录页显示「等待微信确认」并每 2.5 秒轮询，确认后自动进入首页；再次点击会先丢弃未认领的旧会话（`SyncEngine.abandonLogin`）再申请新码，等待中也可以「取消这次登录」回到初始态。已绑定账号调用该方法会被拒绝。
 
@@ -80,9 +79,9 @@ python3 tools/build.py --interop /path/to/current/interop
 
 - `runtime.version` 不匹配 → 要解包 BepInEx / .NET 运行时；
 - `game.version` 与游戏 APK 指纹（路径 + 大小 + mtime）不一致 → 要提取游戏元数据并重新生成代理，同时必然要下 Unity 依赖；
-- `BepInEx/unity-libs/<Unity 版本>.zip` 缺失或不是有效 zip → 要从 `unity.bepinex.dev` 下载几 MB 的依赖。
+- `BepInEx/unity-libs/<Unity 版本>.zip` 缺失或不是有效 zip → 安装包里有同版本内置副本就直接解出（无需联网），否则从 `unity.bepinex.dev` 下载几 MB。
 
-需要干活时才弹「先准备运行环境」面板：列出这次会做的事（下载依赖 / 解包运行时 / 重新生成代理），说明约 1–2 分钟、建议 Wi-Fi、保持前台，给「开始准备 / 取消」；环境已就绪时点「启动游戏」直接进游戏，不再打扰。若这次需要下载但当前没有网络，直接提示先连网，不进入准备流程（避免下到一半失败）。准备过程中原来的进度面板照常显示真实阶段文案。
+需要干活时才弹「先准备运行环境」面板：列出这次会做的事（下载依赖 / 解包运行时 / 重新生成代理），说明约 1–2 分钟、建议 Wi-Fi、保持前台，给「开始准备 / 取消」；环境已就绪时点「启动游戏」直接进游戏，不再打扰。若这次确实要联网下载（安装包里没有匹配的 Unity 基础库）而当前没有网络，直接提示先连网，不进入准备流程（避免下到一半失败）。准备过程中原来的进度面板照常显示真实阶段文案。
 
 游戏本体首次运行还会自己下载资源包，那部分不经过助手。
 
@@ -130,14 +129,16 @@ dotnet run --project tests/clock/ClockTests.csproj          # 11 项逻辑帧换
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=TimerOverlayTests python3 tools/test-device.py   # 28 项布局 / 拖拽 / 开关 / 格式
 ```
 
-SDK 构建产物 `build/BazaarHelper-0.1.2.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
+SDK 构建产物 `build/BazaarHelper-0.1.4.apk`，逐依赖 / 游戏代理哈希在 `build/build-manifest.json`；Gradle 产物在 `app/build/outputs/apk/debug/`。开发签名私钥位于 `.keystore/`，被 Git 忽略，保留它才能覆盖安装同一签名的后续 SDK 构建。正式分发签名需单独管理。
 
 ```sh
-adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.2.apk
+adb -s DEVICE install --no-incremental -r build/BazaarHelper-0.1.4.apk
 adb -s DEVICE shell am start -n com.bazzarhelper.android/.ui.MainActivity
 ```
 
-旧应用不卸载。新包拥有独立 UID、游戏登录缓存、助手微信绑定和战绩库，需要重新登录。原游戏 APK 仍单独安装，助手不重签或覆盖它。游戏首次启动 / 更新生成代理较慢，界面展示真实生成进度，应保持前台。
+旧应用不卸载。新包拥有独立 UID、游戏登录缓存、助手微信绑定和战绩库，需要重新登录。原游戏 APK 仍单独安装，助手不重签或覆盖它。游戏首次启动 / 更新生成代理较慢，界面用居中卡片显示阶段、该阶段预计耗时、从 00:00 累加的已用时间与百分比（生成代理停在 92% 直到真正完成，再到 100% 淡出；超过 3 分钟会提示「已超出预计时间，仍在生成」），期间应保持前台。
+
+Unity 基础库（`unity.bepinex.dev` 的 `<Unity 版本>.zip`，约 3 MB、78 个 `UnityEngine.*.dll`）打进 APK 的 `assets/unity-libs/`，由 `third-party/unity-libs.json` 按「游戏 Unity 版本 → 上游 zip 版本」显式映射并固定 SHA-256，构建时 `tools/prepare-dependencies.py` 取回 `.local/assets/unity-libs/<游戏版本>.zip`（pin 里删掉的条目会在构建时自动清理）。`RuntimeInstaller.bundledUnityLibs` 只做**文件名精确匹配**：游戏 Unity 版本与条目完全一致才用内置副本，任何不一致都回退网络下载，由下载路径按 BepInEx 的「同版本线就近取旧」规则处理，运行时不做任何版本猜测。当前条目是游戏 `6000.3.27` → 上游 `6000.3.26`（镜像最高只到 26，下载路径本来就回退到这版）。
 
 ## 验证
 
@@ -149,7 +150,7 @@ ADB_PORT=5037 ANDROID_SERIAL=emulator-5580 python3 tools/test-device.py
 # ExportTests（诊断压缩包）、LaunchNoticeTests（启动提示，会临时改 stamp 再还原）、
 # PrepareTests（真实准备，需网络）
 ADB_PORT=5038 ANDROID_SERIAL=DEVICE TEST_RUNNER=LaunchNoticeTests python3 tools/test-device.py
-python3 tools/check-apk.py build/BazaarHelper-0.1.2.apk
+python3 tools/check-apk.py build/BazaarHelper-0.1.4.apk
 ```
 
 同步测试使用独立测试数据库与密钥别名，不写真实战绩或请求真实账号接口，覆盖 26 项断言：加密、v3 绑定、固定账号归属、匿名隔离、重复采集、不完整回执、内容变化、切号期间的迟到响应 / 401、多次离线退出、刷新响应丢失恢复、SQLite 重开与 JSON 指纹顺序。上传锁按数据库文件命名，测试库不会被应用后台同步的锁挡住。
