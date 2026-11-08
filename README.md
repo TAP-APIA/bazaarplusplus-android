@@ -1,71 +1,89 @@
-# BazaarPlusPlus Android
+# 大巴扎助手 Android / BazaarHelper
 
-> **这不是上游项目。** 这是 [BazaarPlusPlus](https://github.com/BazaarPlusPlus/BazaarPlusPlus) 的 **Android 移植分支**，由个人维护。
-> 上游官网、下载、Ko-fi 与发行版均与本仓库无关；官方 README 已归档到 [`docs/upstream/`](docs/upstream/README.md)。
-> 遇到问题请在本仓库提 issue，**不要**去上游仓库反馈与 Android 移植相关的内容。
+《The Bazaar》（大巴扎）的手机端助手：在 **不修改游戏 APK** 的前提下，启动游戏、只读采集真实对局战绩、同步到微信小程序，并在战斗时显示悬浮计时。
 
-把 `The Bazaar`（Unity 6000.3 / IL2CPP / arm64-v8a）上的 BazaarPlusPlus 模组移植到 Android 平板，目标是在触屏环境里做到与桌面版行为一致的三大模块：
+下载与版本记录：**https://bazzarhelper.com/**
 
-| 模块 | 状态 | 说明 |
-| --- | --- | --- |
-| **配装**（Live Build） | 进行中 | 局内实时 shop / board / stash，按候选物品匹配十胜终局阵容 |
-| **图鉴**（Collection） | 进行中 | 全卡牌目录、筛选器、原生卡牌检视窗 |
-| **历史**（History） | 进行中 | 对局记录、收藏、战斗回放与本地录制 |
+> 本仓库是 [TAP-APIA/bazaarplusplus-android](https://github.com/TAP-APIA/bazaarplusplus-android) 的 fork，保留了上游 Android 移植的源码作为参考；实际发布的产品是 `bazaar-helper-android/`（包名 `com.bazzarhelper.android`，独立 UID），它的详细说明见 [bazaar-helper-android/README.md](bazaar-helper-android/README.md)。
 
-> 具体进度、已定位的原生根因和当前待办见 [`android-port/HANDOVER-ANDROID-PORT.md`](android-port/HANDOVER-ANDROID-PORT.md)。这是接手时最该先读的文件。
+## 功能
 
-## 与上游的差异
+| 功能 | 说明 |
+| --- | --- |
+| **启动游戏** | 从助手进入已安装的游戏，复用游戏自身的 Activity，不改游戏包、不重签、不覆盖 |
+| **只读采集战绩** | 真实 PvP 的双方棋盘、技能、属性/附魔/格位、结算与战斗指标；怪物 / PvE 对局不采集 |
+| **同步到小程序** | 结算后按当时的账号归属上传既有 v3 API；失败与不完整回执自动重试，成功后内容指纹落盘 |
+| **对局从开局可见** | 一开局就把 run 上传，进行中就能在小程序里查看、分享；是否公开由「分享新战绩」开关控制（默认开） |
+| **战斗悬浮计时** | 战斗中显示可拖动的用时计时，只影响显示，不改变游戏速度与结算 |
+| **账号绑定** | 微信扫码登录（保存小程序码到相册再识别，单机也能完成），凭据用 Android Keystore 加密 |
+| **首次启动准备** | 第一次启动或游戏更新后生成游戏代理，居中卡片显示当前阶段、预计耗时与已用时间，生成阶段停在 92% 等真正完成再走到 100% |
+| **诊断日志** | 首页「导出日志」，打包运行时信息与滚动日志，便于反馈问题 |
 
-- 新增 `BppAndroid` 编译目标，插件以 .NET 6 + BepInEx 6 IL2CPP 运行在游戏子进程内
-- 触屏 UI 入口（`BppTouchEntry`），右上角 UGUI dock 替代桌面快捷键
-- 大量 IL2CPP 互操作适配：`Il2CppCompat`（`GetWorldCornersManaged`、`BppUnityCast`）、`BppCoroutines`（主线程续体）、ARM64 按值 `CancellationToken` 修补
-- 依赖装配调整：托管 `Newtonsoft.Json` 与 `Bpp.Managed.*` MessagePack 使用独立程序集身份，避免与游戏原生代理冲突
-- Android 上显式降级的功能会在启动日志的 `plugin.android.patch_capabilities` 中列出，不静默失败
+## 下载
 
-## 构建
+- 官网：**https://bazzarhelper.com/**（GitHub Release 与夸克网盘两处）
+- 版本记录：https://github.com/dabazzar/BazaarHelperAndroid/releases
+- 最新版本 **0.1.10**，要求 **Android 10+（minSdk 29）、arm64-v8a**，安装时需要允许「安装未知来源应用」
+- 安装后需要与游戏同机运行，并用微信扫码绑定账号；未绑定时只能停在登录页
 
-需要 .NET SDK 8（`$env:DOTNET_ROLL_FORWARD='Major'`），以及由 Il2CppDumper + Il2CppInterop 从游戏 `global-metadata.dat` 生成的代理程序集目录。**该目录是逆向产物，不随仓库分发**，需自行生成。
+## 实现原理
 
-```powershell
-$env:DOTNET_ROLL_FORWARD = 'Major'
-& dotnet build bazaarplusplus-mod/src/BazaarPlusPlus/BazaarPlusPlus.csproj `
-    -c Debug -p:BppAndroid=true `
-    -p:ManagedPath=<IL2CPP 代理程序集目录> `
-    -p:NuGetAudit=false -p:TreatWarningsAsErrors=false --nologo
+游戏是 Unity 6000.3 / IL2CPP / arm64-v8a，助手不去改它，而是把「已经装好的游戏」托管到自己进程里跑，再用只读 Hook 观察它的网络消息与战斗结算。
+
+```
+┌─────────────────────────────── 助手 APK（com.bazzarhelper.android，独立 UID）──────────────────────────────┐
+│ Java 应用层  ui/ sync/ data/    登录、同步、SQLite(WAL) 战绩库与 outbox、Keystore 加密凭据、界面          │
+│      ▲ JNI（无网络调用，只在回调里投影成白名单 JSON）                                                     │
+│ runtime/GameRuntime              用 PathClassLoader + Instrumentation 重定向把游戏的 UnityPlayerActivity    │
+│                                  跑在助手 UID 下；游戏仍从它自己的 APK 读取资源与 native 库                 │
+│      ▲ BepInEx / .NET（固定版本 NextBep/BepInEx.Android.Launcher@44e1e59）                                 │
+│ hook/BazaarHelper.Hook.dll       Harmony patch NetMessageProcessor.Receive / CombatSimHandler.Simulate，     │
+│                                  只读观察 PvP 开局、结算与战斗帧，不写游戏状态                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                   │ 结算后 HTTPS
+                                   ▼
+                        既有 v3 API → 微信小程序（战绩、分享、社区）
 ```
 
-产物为 `bin/Debug/net6.0/BazaarPlusPlus.dll`，部署时需要**双写**到设备的 `BepInEx/plugins/` 与 `modpacks/bpp/plugins/`（启动器每次启动会用 modpack 覆盖前者）。
+关键点：
 
-## 仓库结构
+- **不改游戏包**：助手用独立 UID 与独立私有目录；游戏的 `assets/bin/Data`、interop 代理都在助手私有目录重新生成，原游戏 APK 只读。
+- **首次生成代理**：从游戏包提取元数据后用 Cpp2IL / Il2CppInterop 生成代理程序集（首次约 1–2 分钟），只在游戏版本变化时重做；Unity 运行库随 APK 内置，命中时无需联网。
+- **只读采集**：只监听消息分发与战斗模拟回调，记录双方棋盘、技能、结算与指标；不保存原始网络消息、录像或对手身份，不修改游戏速度、结算与随机数。
+- **采集边界**：只有对手是真实玩家（英雄可解析）时才算一局 PvP，怪物 / PvE 战斗直接跳过；同一 run 同一自然日只记录一场。
+- **上传**：结算时固定账号归属，匿名记录不在后续绑定时认领；切号不能转移历史；跨进程上传锁 + 内容 SHA-256 + 严格回执数量，避免漏传、重复确认与迟到 401 清掉新会话。
+- **悬浮计时**：宿主在游戏 DecorView 上加一个不拦截触摸的计时条，按逻辑帧累计；开关与位置存在共享键值表里，两个进程共用。
 
-| 路径 | 说明 |
+## 目录
+
+| 路径 | 内容 |
 | --- | --- |
-| `bazaarplusplus-mod/` | 模组主工程（本仓库改动的主体） |
-| `bazaarplusplus-installer/` | 上游 Tauri 桌面安装器（Android 未适配） |
-| `bazaarplusplus-site/` `bazaarplusplus-server/` `bazaarplusplus-analyzer/` | 上游其余组件，未针对 Android 修改 |
-| `android-port/` | 移植交接文档、分发脚本、逆向辅助工具源码 |
-| `docs/upstream/` | 上游原始 README，仅作出处存档 |
+| `bazaar-helper-android/` | 发布的产品：Java 应用、.NET Hook、SDK 构建脚本、CI workflow、设备测试 |
+| `android-port/`、`bazaarplusplus-*/`、`release/` 等 | 上游 BazaarPlusPlus Android 移植的源码，作为参考保留；不属于发布包 |
 
-`android-port/` 内含：
+## 构建与验证
 
-- `HANDOVER-ANDROID-PORT.md` —— 进展、根因清单、待办
-- `ACCEPTANCE-ROUND1-20261024.md` —— 首轮至第六轮真机验收记录（十胜阵容多源回退、立绘、检视窗遮罩与触控射线校准）
-- `package-modpack.ps1` / `install-to-device.ps1` —— 打包与双写部署
-- `patch-harmony-arm64/` —— ARM64 按值 `CancellationToken` 装箱修补工具
-- `package-managed-codec/`、`codec-smoke/` —— Managed MessagePack 程序集身份打包与验证
-- `ilstool/` —— Mono.Cecil 的 IL2CPP 运行时补丁工具
+```sh
+cd bazaar-helper-android
+python3 tools/build.py --interop .local/game-interop   # SDK 直接构建（生成 interop 是编译输入，不入库）
+./gradlew :app:assembleDebug                           # 或走标准 Gradle
+python3 tools/check-apk.py build/BazaarHelper-*.apk    # 产物范围检查
+```
 
-## 不在本仓库的内容
+CI（`.github/workflows/bazaar-helper-android.yml`）在推送 `master` 或打 `bazaar-helper-v*` tag 时构建并签名；签名与游戏 interop 都走仓库 secrets，不进仓库也不进 APK。真机测试脚本与更多细节见 [bazaar-helper-android/README.md](bazaar-helper-android/README.md)。
 
-为了不让仓库变成构建产物仓库，以下内容全部通过 `.gitignore` 排除：
+## 数据边界
 
-- 签名材料（keystore / jks / p12）与任何口令、令牌 —— 文档中的历史口令与设备 PIN 已脱敏为 `<keystore-password>` / `<device-pin>`
-- APK、`.so`、`.zip` 等二进制交付物
-- 逆向产物（`apk_extracted/`、`android-managed/`、`dumped*/`）
-- 真机截图、UI dump、logcat 与崩溃 tombstone
+- 只上传规范化后的双方棋盘、技能、属性、结算与战斗指标；不保存原始游戏消息、录像、对手身份或账号密码。
+- 凭据与战绩库放在 `no_backup` 目录，不导出、不自动备份；凭据用 Android Keystore 的 AES-GCM 加密。
+- 新战绩默认随「分享新战绩」开关公开到社区（默认开启），关闭只影响之后的对局；公开状态是单向的，已公开的局不会因为关开关而取消。
 
-因此**本仓库不能直接产出可安装的 APK**，需要本地自备上述产物。
+## 许可证
 
-## 许可与致谢
+[MIT License](LICENSE)
 
-MIT，见 [LICENSE](LICENSE)。原始版权归 Xinyu YANG 与 BazaarPlusPlus Team；本分支的 Android 移植改动同样以 MIT 发布。上游项目地址：<https://github.com/BazaarPlusPlus/BazaarPlusPlus>。
+## 致谢
+
+- [TAP-APIA/bazaarplusplus-android](https://github.com/TAP-APIA/bazaarplusplus-android)：本仓库的 fork 来源，Android 移植的 native 加载与游戏托管方案。
+- [BazaarPlusPlus/BazaarPlusPlus](https://github.com/BazaarPlusPlus/BazaarPlusPlus)：原始的桌面端模组项目。
+- 以及 BepInEx / Il2CppInterop / NextBep 等开源项目，助手只使用它们的公共运行时基础设施。
