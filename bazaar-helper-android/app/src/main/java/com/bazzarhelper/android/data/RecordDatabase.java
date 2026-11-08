@@ -23,7 +23,7 @@ public final class RecordDatabase extends SQLiteOpenHelper {
         context,
         new File(context.getNoBackupFilesDir(), name + ".sqlite").getAbsolutePath(),
         null,
-        2);
+        3);
     directory = context.getNoBackupFilesDir();
     cipher = new CredentialCipher(alias);
     setWriteAheadLoggingEnabled(true);
@@ -47,8 +47,21 @@ public final class RecordDatabase extends SQLiteOpenHelper {
 
   @Override
   public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-    if (oldVersion == 1 && newVersion == 2) {
+    if (oldVersion == 1 && newVersion >= 2) {
       db.execSQL("ALTER TABLE run_facts ADD COLUMN facts TEXT");
+      oldVersion = 2;
+    }
+    if (oldVersion == 2 && newVersion == 3) {
+      // Battles recorded before the hook learned to tell monster/PvE fights apart carry the placeholder
+      // hero EHero.Common; they are not player-vs-player and must never reach the uploader.
+      // Only drop rows the server already acknowledged: anything still waiting to upload keeps its
+      // place in the outbox, so this cleanup can never lose a battle that was never sent.
+      int removed =
+          db.delete(
+              "battles",
+              "payload LIKE ? AND EXISTS(SELECT 1 FROM receipts r WHERE r.kind='battle' AND r.id=battles.id)",
+              new String[] {"%\"opponentHero\":\"Common\"%"});
+      com.bazzarhelper.android.Diag.i("db", "dropped " + removed + " uploaded non-player battles");
       return;
     }
     throw new IllegalStateException("Unsupported database migration");

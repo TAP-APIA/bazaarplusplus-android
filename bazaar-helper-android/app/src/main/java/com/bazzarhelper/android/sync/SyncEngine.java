@@ -1,5 +1,6 @@
 package com.bazzarhelper.android.sync;
 
+import com.bazzarhelper.android.Diag;
 import android.content.Context;
 import android.database.Cursor;
 import com.bazzarhelper.android.data.RecordDatabase;
@@ -159,6 +160,13 @@ public final class SyncEngine {
     validId(id);
     if (!Arrays.asList("win", "loss").contains(battle.getString("result")))
       throw new IOException("无效战果");
+    // Only player-vs-player fights are uploaded: a monster/PvE opponent has no hero (EHero.Common is
+    // the enum default), so a missing or "Common" hero means the record is not a PvP battle.
+    String opponentHero = battle.optString("opponentHero", "");
+    if (opponentHero.isEmpty() || "Common".equals(opponentHero)) {
+      Diag.i("capture", "skip non-player battle · opponentHero=" + opponentHero);
+      throw new IOException("非玩家对战，不上报");
+    }
     if (envelope.toString().length() > 1024 * 1024) throw new IOException("记录过大");
     // Only protocol fields enter the durable record, never arbitrary game objects.
     JSONObject clean =
