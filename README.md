@@ -21,10 +21,20 @@
 
 ## 下载
 
-- 官网：**https://bazzarhelper.com/**（GitHub Release 与夸克网盘两处）
-- 版本记录：https://github.com/dabazzar/BazaarHelperAndroid/releases
-- 最新版本 **0.1.10**，要求 **Android 10+（minSdk 29）、arm64-v8a**，安装时需要允许「安装未知来源应用」
+| 渠道 | 地址 |
+| --- | --- |
+| 官网（推荐，含夸克网盘备用） | **https://bazzarhelper.com/** |
+| 最新安装包（GitHub） | https://github.com/dabazzar/BazaarHelperAndroid/releases/latest |
+| 全部版本记录 | https://github.com/dabazzar/BazaarHelperAndroid/releases |
+
+- 当前版本 **0.1.10**，要求 **Android 10+（minSdk 29）、arm64-v8a**，安装时需要允许「安装未知来源应用」
 - 安装后需要与游戏同机运行，并用微信扫码绑定账号；未绑定时只能停在登录页
+
+### 小程序
+
+查图鉴、看战绩、回看对手棋盘都在微信小程序里；装好助手后用它完成扫码绑定。
+
+<img src="assets/bazaarhelper-wechat-mini-program.png" width="560" alt="微信扫一扫，打开大巴扎助手小程序">
 
 ## 实现原理
 
