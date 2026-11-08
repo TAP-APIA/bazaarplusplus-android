@@ -59,7 +59,7 @@ python3 tools/build.py --interop /path/to/current/interop
 
 ## 图标
 
-图标用设计侧提供的 flat 自适应图标资源（`bazaar-assistant-android-clean-v3`，已整套拷进 `app/src/main/res/`）：全部画面都在**满幅、不透明**的背景层里（432×432，没有外金框、没有预圆角，由系统遮罩裁切），前景层是空的透明图，另带 monochrome PNG 与五档传统 PNG。
+图标用设计侧提供的 flat 自适应图标资源（已整套拷进 `app/src/main/res/`）：全部画面都在**满幅、不透明**的背景层里（432×432，没有外金框、没有预圆角，由系统遮罩裁切），前景层是空的透明图，另带 monochrome PNG 与五档传统 PNG。
 
 - `drawable-nodpi/`：`ic_launcher_background.png`（满幅画面）、`ic_launcher_foreground.png`（透明）、`ic_launcher_monochrome.png`（Android 13 主题图标剪影）。
 - `mipmap-{mdpi..xxxhdpi}/ic_launcher(_round).png`：Android 7 及更早用的传统图标。
